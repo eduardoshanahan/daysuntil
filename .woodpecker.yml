@@ -1,3 +1,6 @@
+labels:
+  platform: linux/amd64
+
 when:
   - event: push
     branch: main
@@ -5,8 +8,6 @@ when:
 steps:
   - name: build-and-push
     image: woodpeckerci/plugin-docker-buildx
-    labels:
-      platform: linux/amd64
     settings:
       registry: gitea.hhlab.home.arpa
       repo: gitea.hhlab.home.arpa/eduardo/daysuntil
