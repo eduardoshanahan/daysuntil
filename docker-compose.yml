@@ -1,0 +1,11 @@
+services:
+  daysuntil:
+    build: .
+    ports:
+      - "8888:8080"
+    volumes:
+      - daysuntil-data:/data
+    restart: unless-stopped
+
+volumes:
+  daysuntil-data:

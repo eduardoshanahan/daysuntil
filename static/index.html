@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Days Until</title>
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png" />
+  <link rel="manifest" href="site.webmanifest" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>Days Until</h1>
+    <button id="btn-add" class="btn-primary">+ Add</button>
+  </header>
+
+  <main id="interval-list">
+    <p class="empty-msg">No intervals yet. Add one above.</p>
+  </main>
+
+  <!-- Modal -->
+  <div id="modal-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal">
+      <h2 id="modal-title">Add Interval</h2>
+      <form id="interval-form" novalidate>
+        <input type="hidden" id="field-id" />
+        <label for="field-name">Name</label>
+        <input type="text" id="field-name" placeholder="e.g. Summer vacation" required />
+
+        <label for="field-start">Start date</label>
+        <input type="date" id="field-start" required />
+
+        <label for="field-end">End date</label>
+        <input type="date" id="field-end" required />
+
+        <label for="field-color">Color</label>
+        <div class="color-row">
+          <input type="color" id="field-color" value="#4f8ef7" />
+          <span id="color-swatches" class="color-swatches">
+            <button type="button" class="swatch" data-color="#4f8ef7" style="background:#4f8ef7"></button>
+            <button type="button" class="swatch" data-color="#e05c5c" style="background:#e05c5c"></button>
+            <button type="button" class="swatch" data-color="#50c878" style="background:#50c878"></button>
+            <button type="button" class="swatch" data-color="#f5a623" style="background:#f5a623"></button>
+            <button type="button" class="swatch" data-color="#b47cf7" style="background:#b47cf7"></button>
+            <button type="button" class="swatch" data-color="#40c4c4" style="background:#40c4c4"></button>
+          </span>
+        </div>
+
+        <p id="form-error" class="form-error hidden"></p>
+
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel" class="btn-secondary">Cancel</button>
+          <button type="submit" class="btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
