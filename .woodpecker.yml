@@ -2,6 +2,9 @@ when:
   - event: push
     branch: main
 
+labels:
+  hostname: meganix
+
 steps:
   - name: build-and-push
     image: woodpeckerci/plugin-docker-buildx
@@ -16,6 +19,3 @@ steps:
         from_secret: gitea_username
       password:
         from_secret: gitea_token
-      buildkitd_config: |
-        [registry."gitea.hhlab.home.arpa"]
-          insecure = true
