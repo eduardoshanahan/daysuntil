@@ -89,6 +89,7 @@ main {
   font-size: 0.78rem;
   color: var(--text-muted);
   margin-top: 0.1rem;
+  white-space: nowrap;
 }
 
 .total-days {
@@ -297,11 +298,15 @@ input[type="color"] {
 /* Responsive */
 @media (max-width: 500px) {
   .progress-row {
-    grid-template-columns: 1fr;
-    gap: 0.4rem;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.4rem 0;
+  }
+
+  .bar-track {
+    order: -1;
+    grid-column: 1 / -1;
   }
 
   .day-label.past { text-align: left; }
-
-  .bar-track { order: -1; }
+  .day-label.left { text-align: right; }
 }
