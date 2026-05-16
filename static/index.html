@@ -17,11 +17,16 @@
   </header>
 
   <main id="interval-list">
-    <p class="empty-msg">No intervals yet. Add one above.</p>
+    <p id="loading-msg" class="empty-msg">Loading intervals...</p>
   </main>
 
+  <section id="app-status" class="app-status hidden" role="status" aria-live="polite">
+    <p id="status-message"></p>
+    <button id="btn-retry" type="button" class="btn-secondary hidden">Retry</button>
+  </section>
+
   <!-- Modal -->
-  <div id="modal-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div id="modal-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1">
     <div class="modal">
       <h2 id="modal-title">Add Interval</h2>
       <form id="interval-form" novalidate>
@@ -37,22 +42,22 @@
 
         <label for="field-color">Color</label>
         <div class="color-row">
-          <input type="color" id="field-color" value="#4f8ef7" />
+          <input type="color" id="field-color" value="#4f8ef7" aria-label="Choose custom color" />
           <span id="color-swatches" class="color-swatches">
-            <button type="button" class="swatch" data-color="#4f8ef7" style="background:#4f8ef7"></button>
-            <button type="button" class="swatch" data-color="#e05c5c" style="background:#e05c5c"></button>
-            <button type="button" class="swatch" data-color="#50c878" style="background:#50c878"></button>
-            <button type="button" class="swatch" data-color="#f5a623" style="background:#f5a623"></button>
-            <button type="button" class="swatch" data-color="#b47cf7" style="background:#b47cf7"></button>
-            <button type="button" class="swatch" data-color="#40c4c4" style="background:#40c4c4"></button>
+            <button type="button" class="swatch" data-color="#4f8ef7" style="background:#4f8ef7" aria-label="Use blue color"></button>
+            <button type="button" class="swatch" data-color="#e05c5c" style="background:#e05c5c" aria-label="Use red color"></button>
+            <button type="button" class="swatch" data-color="#50c878" style="background:#50c878" aria-label="Use green color"></button>
+            <button type="button" class="swatch" data-color="#f5a623" style="background:#f5a623" aria-label="Use orange color"></button>
+            <button type="button" class="swatch" data-color="#b47cf7" style="background:#b47cf7" aria-label="Use violet color"></button>
+            <button type="button" class="swatch" data-color="#40c4c4" style="background:#40c4c4" aria-label="Use teal color"></button>
           </span>
         </div>
 
-        <p id="form-error" class="form-error hidden"></p>
+        <p id="form-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
 
         <div class="modal-actions">
           <button type="button" id="btn-cancel" class="btn-secondary">Cancel</button>
-          <button type="submit" class="btn-primary">Save</button>
+          <button type="submit" id="btn-save" class="btn-primary">Save</button>
         </div>
       </form>
     </div>

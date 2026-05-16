@@ -10,19 +10,36 @@ const fieldStart = document.getElementById('field-start');
 const fieldEnd   = document.getElementById('field-end');
 const fieldColor = document.getElementById('field-color');
 const formError  = document.getElementById('form-error');
+const btnSave    = document.getElementById('btn-save');
 const btnAdd    = document.getElementById('btn-add');
 const btnCancel = document.getElementById('btn-cancel');
+const btnRetry  = document.getElementById('btn-retry');
+const loadingMsg = document.getElementById('loading-msg');
+const appStatus = document.getElementById('app-status');
+const statusMessage = document.getElementById('status-message');
+const colorSwatches = document.getElementById('color-swatches');
+
+let isSubmitting = false;
+let activeLoadToken = 0;
+const pendingDeleteIds = new Set();
+let lastFocusedElement = null;
 
 // ── API ────────────────────────────────────────────────────────────────────────
 
 async function apiFetch(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
+  let res;
+  try {
+    res = await fetch(path, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+    });
+  } catch {
+    throw new Error('Network error. Check your connection and try again.');
+  }
+
   if (!res.ok) {
-    const msg = await res.text();
-    throw new Error(msg || res.statusText);
+    const msg = (await res.text()).trim();
+    throw new Error(msg || `Request failed with status ${res.status}.`);
   }
   if (res.status === 204) return null;
   return res.json();
@@ -84,6 +101,7 @@ function statusLabel(status, p) {
 
 function renderCard(iv) {
   const p = computeProgress(iv);
+  const isDeleting = pendingDeleteIds.has(iv.id);
 
   const card = document.createElement('div');
   card.className = 'card';
@@ -107,8 +125,8 @@ function renderCard(iv) {
         <div class="card-dates">${formatDate(iv.start_date)} &ndash; ${formatDate(iv.end_date)} <span class="total-days">${p.total} days</span></div>
       </div>
       <div class="card-actions">
-        <button class="btn-icon btn-edit" title="Edit">Edit</button>
-        <button class="btn-icon danger btn-delete" title="Delete">Delete</button>
+        <button class="btn-icon btn-edit" title="Edit" aria-label="Edit ${escHtml(iv.name)}" ${isDeleting ? 'disabled' : ''}>Edit</button>
+        <button class="btn-icon danger btn-delete" title="Delete" aria-label="${isDeleting ? `Deleting ${escHtml(iv.name)}` : `Delete ${escHtml(iv.name)}`}" ${isDeleting ? 'disabled' : ''}>${isDeleting ? 'Deleting...' : 'Delete'}</button>
       </div>
     </div>
     <div class="progress-row">
@@ -128,29 +146,55 @@ function escHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-async function loadIntervals() {
-  const intervals = await api.list();
-  list.innerHTML = '';
-  if (!intervals.length) {
-    list.innerHTML = '<p class="empty-msg">No intervals yet. Add one above.</p>';
-    return;
+async function loadIntervals(options = {}) {
+  const preserveStatus = options.preserveStatus === true;
+  const loadToken = ++activeLoadToken;
+
+  if (!list.children.length) {
+    loadingMsg?.classList.remove('hidden');
   }
-  intervals.forEach(iv => list.appendChild(renderCard(iv)));
+
+  try {
+    const intervals = await api.list();
+    if (loadToken !== activeLoadToken) return;
+
+    list.innerHTML = '';
+    if (!intervals.length) {
+      list.innerHTML = '<p class="empty-msg">No intervals yet. Add your first one above.</p>';
+      if (!preserveStatus) {
+        clearStatus();
+      }
+      return;
+    }
+    intervals.forEach(iv => list.appendChild(renderCard(iv)));
+    if (!preserveStatus) {
+      clearStatus();
+    }
+  } catch (err) {
+    if (loadToken !== activeLoadToken) return;
+    if (!list.children.length) {
+      list.innerHTML = '<p class="empty-msg">Unable to load intervals. Check the connection or try again.</p>';
+    }
+    showStatus(err.message, { retry: true, tone: 'error' });
+  }
 }
 
 // ── Modal ──────────────────────────────────────────────────────────────────────
 
 function openAdd() {
+  lastFocusedElement = document.activeElement;
   modalTitle.textContent = 'Add Interval';
   fieldId.value    = '';
   form.reset();
   fieldColor.value = '#4f8ef7';
   hideError();
+  document.body.classList.add('modal-open');
   overlay.classList.remove('hidden');
   fieldName.focus();
 }
 
 function openEdit(iv) {
+  lastFocusedElement = document.activeElement;
   modalTitle.textContent = 'Edit Interval';
   fieldId.value    = iv.id;
   fieldName.value  = iv.name;
@@ -158,12 +202,18 @@ function openEdit(iv) {
   fieldEnd.value   = iv.end_date;
   fieldColor.value = iv.color || '#4f8ef7';
   hideError();
+  document.body.classList.add('modal-open');
   overlay.classList.remove('hidden');
   fieldName.focus();
 }
 
-function closeModal() {
+function closeModal(force = false) {
+  if (isSubmitting && !force) return;
   overlay.classList.add('hidden');
+  document.body.classList.remove('modal-open');
+  if (lastFocusedElement instanceof HTMLElement) {
+    lastFocusedElement.focus();
+  }
 }
 
 function showError(msg) {
@@ -179,23 +229,43 @@ function hideError() {
 // ── Delete ─────────────────────────────────────────────────────────────────────
 
 async function confirmDelete(iv) {
+  if (pendingDeleteIds.has(iv.id)) return;
   if (!confirm(`Delete "${iv.name}"?`)) return;
-  await api.delete(iv.id);
+
+  pendingDeleteIds.add(iv.id);
   await loadIntervals();
+  let keepStatus = false;
+
+  try {
+    await api.delete(iv.id);
+    clearStatus();
+  } catch (err) {
+    keepStatus = true;
+    showStatus(err.message, { retry: true, tone: 'error' });
+  } finally {
+    pendingDeleteIds.delete(iv.id);
+    await loadIntervals({ preserveStatus: keepStatus });
+  }
 }
 
 // ── Events ─────────────────────────────────────────────────────────────────────
 
 btnAdd.addEventListener('click', openAdd);
 btnCancel.addEventListener('click', closeModal);
+btnRetry.addEventListener('click', () => {
+  clearStatus();
+  loadIntervals();
+});
 overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeModal();
+  if (e.key === 'Tab' && !overlay.classList.contains('hidden')) trapModalFocus(e);
 });
 
 form.addEventListener('submit', async e => {
   e.preventDefault();
+  if (isSubmitting) return;
   hideError();
 
   const name  = fieldName.value.trim();
@@ -210,25 +280,78 @@ form.addEventListener('submit', async e => {
   const data = { name, start_date: start, end_date: end, color: fieldColor.value };
 
   try {
+    setSubmitting(true);
     const id = fieldId.value;
     if (id) {
       await api.update(id, data);
     } else {
       await api.create(data);
     }
-    closeModal();
+    clearStatus();
+    closeModal(true);
     await loadIntervals();
   } catch (err) {
     showError(err.message);
+  } finally {
+    setSubmitting(false);
   }
 });
 
 // ── Color swatches ─────────────────────────────────────────────────────────────
 
-document.getElementById('color-swatches').addEventListener('click', e => {
+colorSwatches.addEventListener('click', e => {
   const btn = e.target.closest('.swatch');
   if (btn) fieldColor.value = btn.dataset.color;
 });
+
+function setSubmitting(nextValue) {
+  isSubmitting = nextValue;
+  btnSave.disabled = nextValue;
+  btnCancel.disabled = nextValue;
+  btnAdd.disabled = nextValue;
+  btnSave.textContent = nextValue ? 'Saving...' : 'Save';
+}
+
+function showStatus(message, options = {}) {
+  statusMessage.textContent = message;
+  appStatus.classList.remove('hidden', 'error');
+  appStatus.setAttribute('role', options.tone === 'error' ? 'alert' : 'status');
+  appStatus.setAttribute('aria-live', options.tone === 'error' ? 'assertive' : 'polite');
+  if (options.tone === 'error') {
+    appStatus.classList.add('error');
+  }
+  btnRetry.classList.toggle('hidden', !options.retry);
+}
+
+function clearStatus() {
+  statusMessage.textContent = '';
+  appStatus.classList.add('hidden');
+  appStatus.classList.remove('error');
+  appStatus.setAttribute('role', 'status');
+  appStatus.setAttribute('aria-live', 'polite');
+  btnRetry.classList.add('hidden');
+}
+
+function trapModalFocus(event) {
+  const focusable = overlay.querySelectorAll(
+    'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+  );
+  if (!focusable.length) return;
+
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+    return;
+  }
+
+  if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
 
 // ── Init ───────────────────────────────────────────────────────────────────────
 

@@ -3,9 +3,12 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -28,8 +31,7 @@ func (h *handler) listIntervals(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) createInterval(w http.ResponseWriter, r *http.Request) {
 	var iv Interval
-	if err := json.NewDecoder(r.Body).Decode(&iv); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+	if err := decodeJSONBody(w, r, &iv); err != nil {
 		return
 	}
 	if err := validateInterval(iv); err != nil {
@@ -52,8 +54,7 @@ func (h *handler) updateInterval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var iv Interval
-	if err := json.NewDecoder(r.Body).Decode(&iv); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+	if err := decodeJSONBody(w, r, &iv); err != nil {
 		return
 	}
 	if err := validateInterval(iv); err != nil {
@@ -61,6 +62,10 @@ func (h *handler) updateInterval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := updateInterval(h.db, id, iv); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -75,6 +80,10 @@ func (h *handler) deleteInterval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := deleteInterval(h.db, id); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -82,14 +91,20 @@ func (h *handler) deleteInterval(w http.ResponseWriter, r *http.Request) {
 }
 
 func validateInterval(iv Interval) error {
-	if iv.Name == "" {
+	name := strings.TrimSpace(iv.Name)
+	if name == "" {
 		return fmt.Errorf("name is required")
 	}
-	if _, err := parseDate(iv.StartDate); err != nil {
+	start, err := parseDate(iv.StartDate)
+	if err != nil {
 		return fmt.Errorf("invalid start_date: %w", err)
 	}
-	if _, err := parseDate(iv.EndDate); err != nil {
+	end, err := parseDate(iv.EndDate)
+	if err != nil {
 		return fmt.Errorf("invalid end_date: %w", err)
+	}
+	if !end.After(start) {
+		return fmt.Errorf("end_date must be after start_date")
 	}
 	return nil
 }
@@ -97,4 +112,23 @@ func validateInterval(iv Interval) error {
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
+}
+
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+
+	if err := dec.Decode(dst); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return err
+	}
+
+	if err := dec.Decode(&struct{}{}); err != nil && !errors.Is(err, io.EOF) {
+		http.Error(w, "request body must contain a single JSON object", http.StatusBadRequest)
+		return err
+	}
+
+	return nil
 }

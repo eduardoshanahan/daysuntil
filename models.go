@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -12,6 +13,8 @@ type Interval struct {
 	EndDate   string `json:"end_date"`
 	Color     string `json:"color"`
 }
+
+var ErrNotFound = errors.New("interval not found")
 
 func initDB(db *sql.DB) error {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS intervals (
@@ -24,8 +27,18 @@ func initDB(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	// Migration: add color column to existing databases (ignore error if already exists).
-	db.Exec(`ALTER TABLE intervals ADD COLUMN color TEXT NOT NULL DEFAULT '#4f8ef7'`)
+
+	hasColorColumn, err := intervalColumnExists(db, "color")
+	if err != nil {
+		return err
+	}
+	if !hasColorColumn {
+		_, err = db.Exec(`ALTER TABLE intervals ADD COLUMN color TEXT NOT NULL DEFAULT '#4f8ef7'`)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -66,19 +79,64 @@ func updateInterval(db *sql.DB, id int64, iv Interval) error {
 	if iv.Color == "" {
 		iv.Color = "#4f8ef7"
 	}
-	_, err := db.Exec(
+	res, err := db.Exec(
 		`UPDATE intervals SET name=?, start_date=?, end_date=?, color=? WHERE id=?`,
 		iv.Name, iv.StartDate, iv.EndDate, iv.Color, id,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func deleteInterval(db *sql.DB, id int64) error {
-	_, err := db.Exec(`DELETE FROM intervals WHERE id=?`, id)
-	return err
+	res, err := db.Exec(`DELETE FROM intervals WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // parseDate parses an ISO 8601 date string (YYYY-MM-DD).
 func parseDate(s string) (time.Time, error) {
 	return time.Parse("2006-01-02", s)
+}
+
+func intervalColumnExists(db *sql.DB, column string) (bool, error) {
+	rows, err := db.Query(`PRAGMA table_info(intervals)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name string
+		var columnType string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+
+	return false, rows.Err()
 }
