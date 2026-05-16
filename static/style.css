@@ -138,6 +138,41 @@ header #btn-add {
   width: 100%;
 }
 
+.auth-oauth {
+  margin-top: 1rem;
+}
+
+.auth-divider {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.auth-divider span {
+  display: block;
+  height: 1px;
+  background: var(--border);
+}
+
+.auth-divider p {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.auth-oauth-btn {
+  display: block;
+  width: 100%;
+  text-align: center;
+  text-decoration: none;
+}
+
+.auth-oauth-btn.disabled {
+  pointer-events: none;
+  opacity: 0.55;
+}
+
 .auth-switch-copy {
   margin-top: 1rem;
   color: var(--text-muted);

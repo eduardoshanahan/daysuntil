@@ -40,6 +40,8 @@ const authSwitchLabel = document.getElementById('auth-switch-label');
 const authKicker = document.getElementById('auth-kicker');
 const authTitle = document.getElementById('auth-title');
 const authSubtitle = document.getElementById('auth-subtitle');
+const authOAuth = document.getElementById('auth-oauth');
+const authGithub = document.getElementById('auth-github');
 
 let isSubmitting = false;
 let isAuthSubmitting = false;
@@ -79,6 +81,7 @@ async function apiFetch(path, options = {}) {
 }
 
 const api = {
+  providers: () => apiFetch('/api/auth/providers'),
   me: () => apiFetch('/api/me'),
   register: data => apiFetch('/api/register', { method: 'POST', body: JSON.stringify(data) }),
   login: data => apiFetch('/api/login', { method: 'POST', body: JSON.stringify(data) }),
@@ -387,6 +390,8 @@ function setAuthSubmitting(nextValue) {
   authSwitch.disabled = nextValue;
   authUsername.disabled = nextValue;
   authPassword.disabled = nextValue;
+  authGithub.classList.toggle('disabled', nextValue);
+  authGithub.setAttribute('aria-disabled', nextValue ? 'true' : 'false');
 }
 
 function setSubmitting(nextValue) {
@@ -628,6 +633,15 @@ colorSwatches.addEventListener('click', event => {
 
 async function init() {
   setAuthMode(false);
+  const params = new URLSearchParams(window.location.search);
+  const authError = params.get('auth_error');
+
+  try {
+    const providers = await api.providers();
+    authOAuth.classList.toggle('hidden', !providers.github_enabled);
+  } catch {
+    authOAuth.classList.add('hidden');
+  }
 
   try {
     const user = await api.me();
@@ -637,11 +651,18 @@ async function init() {
     if (err.status === 401) {
       setCurrentUser(null);
       authView.classList.remove('hidden');
+      if (authError) {
+        showAuthError(authError);
+        window.history.replaceState({}, '', window.location.pathname);
+      }
       authUsername.focus();
       return;
     }
     setCurrentUser(null);
-    showAuthError(err.message);
+    showAuthError(authError || err.message);
+    if (authError) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
     authUsername.focus();
   }
 }

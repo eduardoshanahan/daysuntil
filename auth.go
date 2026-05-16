@@ -6,9 +6,13 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -17,6 +21,7 @@ import (
 
 const (
 	sessionCookieName = "daysuntil_session"
+	oauthStateCookie  = "daysuntil_oauth_state"
 	sessionTTL        = 30 * 24 * time.Hour
 )
 
@@ -34,13 +39,51 @@ type userCredentials struct {
 	Password string `json:"password"`
 }
 
+type githubOAuthConfig struct {
+	ClientID     string
+	ClientSecret string
+	CallbackURL  string
+	AuthorizeURL string
+	TokenURL     string
+	UserURL      string
+}
+
+type authProvidersResponse struct {
+	GitHubEnabled bool `json:"github_enabled"`
+}
+
+type githubOAuthUser struct {
+	ID    int64  `json:"id"`
+	Login string `json:"login"`
+}
+
+type githubTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	Scope       string `json:"scope"`
+	Error       string `json:"error"`
+}
+
 func initAuthDB(db *sql.DB) error {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS users (
-		id            INTEGER PRIMARY KEY AUTOINCREMENT,
-		username      TEXT NOT NULL UNIQUE,
-		password_hash TEXT NOT NULL,
-		created_at    TEXT NOT NULL
+		id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+		username              TEXT NOT NULL UNIQUE,
+		password_hash         TEXT NOT NULL,
+		auth_provider         TEXT NOT NULL DEFAULT '',
+		auth_provider_user_id TEXT NOT NULL DEFAULT '',
+		created_at            TEXT NOT NULL
 	)`)
+	if err != nil {
+		return err
+	}
+
+	if err := ensureUserColumn(db, "auth_provider", "ALTER TABLE users ADD COLUMN auth_provider TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureUserColumn(db, "auth_provider_user_id", "ALTER TABLE users ADD COLUMN auth_provider_user_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_provider_identity ON users(auth_provider, auth_provider_user_id) WHERE auth_provider <> '' AND auth_provider_user_id <> ''`)
 	if err != nil {
 		return err
 	}
@@ -67,6 +110,18 @@ func initAuthDB(db *sql.DB) error {
 	}
 
 	return nil
+}
+
+func ensureUserColumn(db *sql.DB, column, statement string) error {
+	exists, err := tableColumnExists(db, "users", column)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	_, err = db.Exec(statement)
+	return err
 }
 
 func validateCredentials(creds userCredentials) (string, error) {
@@ -115,7 +170,7 @@ func createUser(db *sql.DB, creds userCredentials) (User, error) {
 	}
 
 	res, err := tx.Exec(
-		`INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)`,
+		`INSERT INTO users (username, password_hash, auth_provider, auth_provider_user_id, created_at) VALUES (?, ?, '', '', ?)`,
 		username, string(passwordHash), time.Now().UTC().Format(time.RFC3339),
 	)
 	if err != nil {
@@ -163,11 +218,157 @@ func authenticateUser(db *sql.DB, creds userCredentials) (User, error) {
 		return User{}, err
 	}
 
+	if passwordHash == "" {
+		return User{}, fmt.Errorf("this account uses GitHub sign-in")
+	}
 	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(creds.Password)); err != nil {
 		return User{}, fmt.Errorf("invalid username or password")
 	}
 
 	return user, nil
+}
+
+func authProviders(config githubOAuthConfig) authProvidersResponse {
+	return authProvidersResponse{GitHubEnabled: config.Enabled()}
+}
+
+func githubConfigFromEnv() githubOAuthConfig {
+	callbackURL := strings.TrimSpace(os.Getenv("GITHUB_CALLBACK_URL"))
+	if callbackURL == "" {
+		baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("BASE_URL")), "/")
+		if baseURL != "" {
+			callbackURL = baseURL + "/api/oauth/github/callback"
+		}
+	}
+
+	return githubOAuthConfig{
+		ClientID:     strings.TrimSpace(os.Getenv("GITHUB_CLIENT_ID")),
+		ClientSecret: strings.TrimSpace(os.Getenv("GITHUB_CLIENT_SECRET")),
+		CallbackURL:  callbackURL,
+		AuthorizeURL: "https://github.com/login/oauth/authorize",
+		TokenURL:     "https://github.com/login/oauth/access_token",
+		UserURL:      "https://api.github.com/user",
+	}
+}
+
+func (c githubOAuthConfig) Enabled() bool {
+	return c.ClientID != "" && c.ClientSecret != "" && c.CallbackURL != ""
+}
+
+func findUserByProvider(db *sql.DB, provider, providerUserID string) (User, error) {
+	var user User
+	err := db.QueryRow(
+		`SELECT id, username FROM users WHERE auth_provider=? AND auth_provider_user_id=?`,
+		provider, providerUserID,
+	).Scan(&user.ID, &user.Username)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return User{}, ErrNotFound
+		}
+		return User{}, err
+	}
+	return user, nil
+}
+
+func findOrCreateOAuthUser(db *sql.DB, provider, providerUserID, providerLogin string) (User, error) {
+	user, err := findUserByProvider(db, provider, providerUserID)
+	if err == nil {
+		return user, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return User{}, err
+	}
+
+	baseUsername := providerUsername(provider, providerLogin, providerUserID)
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	tx, err := db.Begin()
+	if err != nil {
+		return User{}, err
+	}
+	defer tx.Rollback()
+
+	var userCount int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&userCount); err != nil {
+		return User{}, err
+	}
+
+	username := baseUsername
+	for attempt := 2; ; attempt += 1 {
+		res, err := tx.Exec(
+			`INSERT INTO users (username, password_hash, auth_provider, auth_provider_user_id, created_at) VALUES (?, '', ?, ?, ?)`,
+			username, provider, providerUserID, now,
+		)
+		if err == nil {
+			userID, lastErr := res.LastInsertId()
+			if lastErr != nil {
+				return User{}, lastErr
+			}
+
+			if userCount == 0 {
+				_, lastErr = tx.Exec(`UPDATE intervals SET user_id=? WHERE user_id IS NULL`, userID)
+				if lastErr != nil {
+					return User{}, lastErr
+				}
+			}
+
+			if lastErr = tx.Commit(); lastErr != nil {
+				return User{}, lastErr
+			}
+
+			return User{ID: userID, Username: username}, nil
+		}
+
+		errText := strings.ToLower(err.Error())
+		if strings.Contains(errText, "auth_provider") && strings.Contains(errText, "auth_provider_user_id") {
+			return findUserByProvider(db, provider, providerUserID)
+		}
+		if !strings.Contains(errText, "unique") {
+			return User{}, err
+		}
+
+		username = fmt.Sprintf("%s-%d", truncateUsername(baseUsername, 60), attempt)
+	}
+}
+
+func providerUsername(provider, login, providerUserID string) string {
+	normalized := normalizeExternalUsername(login)
+	if normalized == "" {
+		normalized = providerUserID
+	}
+	username := fmt.Sprintf("%s_%s", provider, normalized)
+	if len(username) > 64 {
+		return username[:64]
+	}
+	return username
+}
+
+func normalizeExternalUsername(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var builder strings.Builder
+	lastDash := false
+
+	for _, r := range value {
+		valid := r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-'
+		if valid {
+			builder.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			builder.WriteByte('-')
+			lastDash = true
+		}
+	}
+
+	return strings.Trim(builder.String(), "-")
+}
+
+func truncateUsername(value string, maxLen int) string {
+	if len(value) <= maxLen {
+		return value
+	}
+	return value[:maxLen]
 }
 
 func createSession(db *sql.DB, userID int64) (string, time.Time, error) {
@@ -282,6 +483,107 @@ func clearSessionCookie(w http.ResponseWriter, secure bool) {
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
 	})
+}
+
+func setOAuthStateCookie(w http.ResponseWriter, state string, secure bool) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     oauthStateCookie,
+		Value:    state,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+		MaxAge:   600,
+		Expires:  time.Now().Add(10 * time.Minute),
+	})
+}
+
+func clearOAuthStateCookie(w http.ResponseWriter, secure bool) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     oauthStateCookie,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+	})
+}
+
+func githubAuthorizeURL(config githubOAuthConfig, state string) string {
+	values := url.Values{}
+	values.Set("client_id", config.ClientID)
+	values.Set("redirect_uri", config.CallbackURL)
+	values.Set("scope", "read:user")
+	values.Set("state", state)
+	values.Set("allow_signup", "true")
+	return config.AuthorizeURL + "?" + values.Encode()
+}
+
+func exchangeGitHubCode(client *http.Client, config githubOAuthConfig, code string) (string, error) {
+	values := url.Values{}
+	values.Set("client_id", config.ClientID)
+	values.Set("client_secret", config.ClientSecret)
+	values.Set("code", code)
+	values.Set("redirect_uri", config.CallbackURL)
+
+	req, err := http.NewRequest(http.MethodPost, config.TokenURL, strings.NewReader(values.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var tokenResp githubTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode != http.StatusOK || tokenResp.AccessToken == "" {
+		if tokenResp.Error != "" {
+			return "", fmt.Errorf("github token exchange failed: %s", tokenResp.Error)
+		}
+		return "", fmt.Errorf("github token exchange failed")
+	}
+
+	return tokenResp.AccessToken, nil
+}
+
+func fetchGitHubUser(client *http.Client, config githubOAuthConfig, token string) (githubOAuthUser, error) {
+	req, err := http.NewRequest(http.MethodGet, config.UserURL, nil)
+	if err != nil {
+		return githubOAuthUser{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return githubOAuthUser{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return githubOAuthUser{}, fmt.Errorf("github user request failed: %s", strings.TrimSpace(string(body)))
+	}
+
+	var user githubOAuthUser
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return githubOAuthUser{}, err
+	}
+	if user.ID == 0 || user.Login == "" {
+		return githubOAuthUser{}, fmt.Errorf("github user response was incomplete")
+	}
+	return user, nil
 }
 
 func randomToken(size int) (string, error) {

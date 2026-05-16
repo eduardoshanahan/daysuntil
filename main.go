@@ -30,6 +30,8 @@ func main() {
 	h := &handler{
 		db:           db,
 		cookieSecure: os.Getenv("COOKIE_SECURE") == "true",
+		githubOAuth:  githubConfigFromEnv(),
+		httpClient:   http.DefaultClient,
 	}
 
 	r := newRouter(h)
@@ -51,6 +53,9 @@ func newRouter(h *handler) http.Handler {
 	r.Post("/api/login", h.login)
 	r.Post("/api/logout", h.logout)
 	r.Get("/api/me", h.currentUser)
+	r.Get("/api/auth/providers", h.authProviders)
+	r.Get("/api/oauth/github/start", h.githubOAuthStart)
+	r.Get("/api/oauth/github/callback", h.githubOAuthCallback)
 
 	r.Route("/api/intervals", func(r chi.Router) {
 		r.Use(authMiddleware(h))

@@ -145,7 +145,11 @@ func parseDate(s string) (time.Time, error) {
 }
 
 func intervalColumnExists(db *sql.DB, column string) (bool, error) {
-	rows, err := db.Query(`PRAGMA table_info(intervals)`)
+	return tableColumnExists(db, "intervals", column)
+}
+
+func tableColumnExists(db *sql.DB, tableName, column string) (bool, error) {
+	rows, err := db.Query(`PRAGMA table_info(` + tableName + `)`)
 	if err != nil {
 		return false, err
 	}
