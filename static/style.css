@@ -47,8 +47,113 @@ header h1 {
 }
 
 header #btn-add {
+  justify-self: end;
+}
+
+.header-actions {
   grid-column: 3;
   justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.user-badge {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+#app-view {
+  width: 100%;
+}
+
+.auth-shell {
+  min-height: calc(100dvh - 88px);
+  display: grid;
+  place-items: center;
+  padding: 2rem 1.5rem;
+}
+
+.auth-card {
+  width: min(440px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 1.5rem;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.25);
+}
+
+.auth-kicker {
+  color: var(--accent);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 0.6rem;
+}
+
+.auth-card h2 {
+  font-size: 1.5rem;
+  letter-spacing: -0.03em;
+}
+
+.auth-subtitle {
+  color: var(--text-muted);
+  margin-top: 0.55rem;
+  margin-bottom: 1.25rem;
+  line-height: 1.45;
+}
+
+.auth-form label {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 0.3rem;
+  margin-top: 0.9rem;
+}
+
+.auth-form label:first-of-type {
+  margin-top: 0;
+}
+
+.auth-form input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 0.65rem 0.8rem;
+  border-radius: 9px;
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+.auth-actions {
+  margin-top: 1.25rem;
+}
+
+.auth-actions .btn-primary {
+  width: 100%;
+}
+
+.auth-switch-copy {
+  margin-top: 1rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.btn-link {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
 }
 
 main {
@@ -289,6 +394,7 @@ input:focus-visible {
 }
 
 .modal input:focus { border-color: var(--accent); }
+.auth-form input:focus { border-color: var(--accent); outline: none; }
 
 .modal-actions {
   display: flex;
@@ -346,6 +452,14 @@ input[type="color"] {
     width: calc(100% - 2rem);
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .header-actions {
+    gap: 0.5rem;
+  }
+
+  .user-badge {
+    display: none;
   }
 
   .progress-row {

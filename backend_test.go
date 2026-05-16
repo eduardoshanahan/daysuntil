@@ -2,12 +2,12 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	_ "modernc.org/sqlite"
 )
 
@@ -23,7 +23,60 @@ func openTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
-func TestInitDBAddsColorColumnToLegacySchema(t *testing.T) {
+func newTestServer(t *testing.T) (*sql.DB, http.Handler) {
+	t.Helper()
+
+	db := openTestDB(t)
+	if err := initDB(db); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	return db, newRouter(&handler{db: db})
+}
+
+func performRequest(t *testing.T, h http.Handler, method, path, body string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
+
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func decodeUser(t *testing.T, rec *httptest.ResponseRecorder) User {
+	t.Helper()
+
+	var user User
+	if err := json.NewDecoder(rec.Body).Decode(&user); err != nil {
+		t.Fatalf("decode user: %v", err)
+	}
+	return user
+}
+
+func registerUser(t *testing.T, h http.Handler, username, password string) (*http.Cookie, User) {
+	t.Helper()
+
+	rec := performRequest(t, h, http.MethodPost, "/api/register", `{"username":"`+username+`","password":"`+password+`"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("register user: expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	cookies := rec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("expected session cookie after registration")
+	}
+
+	return cookies[0], decodeUser(t, rec)
+}
+
+func TestInitDBAddsColumnsToLegacySchema(t *testing.T) {
 	db := openTestDB(t)
 
 	_, err := db.Exec(`CREATE TABLE intervals (
@@ -40,12 +93,14 @@ func TestInitDBAddsColorColumnToLegacySchema(t *testing.T) {
 		t.Fatalf("init db: %v", err)
 	}
 
-	hasColorColumn, err := intervalColumnExists(db, "color")
-	if err != nil {
-		t.Fatalf("check color column: %v", err)
-	}
-	if !hasColorColumn {
-		t.Fatal("expected color column to be present after migration")
+	for _, column := range []string{"color", "user_id"} {
+		exists, err := intervalColumnExists(db, column)
+		if err != nil {
+			t.Fatalf("check %s column: %v", column, err)
+		}
+		if !exists {
+			t.Fatalf("expected %s column after migration", column)
+		}
 	}
 }
 
@@ -60,68 +115,140 @@ func TestValidateIntervalRejectsNonIncreasingDates(t *testing.T) {
 	}
 }
 
-func TestCreateIntervalRejectsUnknownFields(t *testing.T) {
-	db := openTestDB(t)
-	if err := initDB(db); err != nil {
-		t.Fatalf("init db: %v", err)
+func TestRegisterAdoptsLegacyIntervalsForFirstUser(t *testing.T) {
+	db, router := newTestServer(t)
+
+	_, err := db.Exec(
+		`INSERT INTO intervals (name, start_date, end_date, color, user_id) VALUES (?, ?, ?, ?, NULL)`,
+		"Legacy Trip", "2026-05-20", "2026-05-30", "#4f8ef7",
+	)
+	if err != nil {
+		t.Fatalf("insert legacy interval: %v", err)
 	}
 
-	h := &handler{db: db}
-	req := httptest.NewRequest(http.MethodPost, "/api/intervals", strings.NewReader(`{
+	cookie, user := registerUser(t, router, "alice", "password123")
+	if user.Username != "alice" {
+		t.Fatalf("expected username alice, got %q", user.Username)
+	}
+
+	rec := performRequest(t, router, http.MethodGet, "/api/intervals", "", cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list intervals: expected 200, got %d", rec.Code)
+	}
+
+	var intervals []Interval
+	if err := json.NewDecoder(rec.Body).Decode(&intervals); err != nil {
+		t.Fatalf("decode intervals: %v", err)
+	}
+	if len(intervals) != 1 || intervals[0].Name != "Legacy Trip" {
+		t.Fatalf("expected adopted legacy interval, got %#v", intervals)
+	}
+}
+
+func TestIntervalsRequireAuthentication(t *testing.T) {
+	_, router := newTestServer(t)
+
+	rec := performRequest(t, router, http.MethodGet, "/api/intervals", "")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+}
+
+func TestLoginAndCurrentUser(t *testing.T) {
+	_, router := newTestServer(t)
+
+	registerUser(t, router, "alice", "password123")
+
+	rec := performRequest(t, router, http.MethodPost, "/api/login", `{"username":"alice","password":"password123"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login: expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	cookie := rec.Result().Cookies()[0]
+
+	me := performRequest(t, router, http.MethodGet, "/api/me", "", cookie)
+	if me.Code != http.StatusOK {
+		t.Fatalf("current user: expected 200, got %d", me.Code)
+	}
+	user := decodeUser(t, me)
+	if user.Username != "alice" {
+		t.Fatalf("expected current user alice, got %q", user.Username)
+	}
+}
+
+func TestUsersOnlySeeTheirOwnIntervals(t *testing.T) {
+	_, router := newTestServer(t)
+
+	aliceCookie, _ := registerUser(t, router, "alice", "password123")
+	bobCookie, _ := registerUser(t, router, "bob", "password123")
+
+	createAlice := performRequest(t, router, http.MethodPost, "/api/intervals", `{
+		"name":"Alice Trip",
+		"start_date":"2026-05-20",
+		"end_date":"2026-05-21",
+		"color":"#4f8ef7"
+	}`, aliceCookie)
+	if createAlice.Code != http.StatusCreated {
+		t.Fatalf("create alice interval: expected 201, got %d (%s)", createAlice.Code, createAlice.Body.String())
+	}
+
+	createBob := performRequest(t, router, http.MethodPost, "/api/intervals", `{
+		"name":"Bob Trip",
+		"start_date":"2026-06-20",
+		"end_date":"2026-06-21",
+		"color":"#e05c5c"
+	}`, bobCookie)
+	if createBob.Code != http.StatusCreated {
+		t.Fatalf("create bob interval: expected 201, got %d (%s)", createBob.Code, createBob.Body.String())
+	}
+
+	aliceList := performRequest(t, router, http.MethodGet, "/api/intervals", "", aliceCookie)
+	bobList := performRequest(t, router, http.MethodGet, "/api/intervals", "", bobCookie)
+
+	var aliceIntervals []Interval
+	if err := json.NewDecoder(aliceList.Body).Decode(&aliceIntervals); err != nil {
+		t.Fatalf("decode alice intervals: %v", err)
+	}
+	if len(aliceIntervals) != 1 || aliceIntervals[0].Name != "Alice Trip" {
+		t.Fatalf("expected only Alice interval, got %#v", aliceIntervals)
+	}
+
+	var bobIntervals []Interval
+	if err := json.NewDecoder(bobList.Body).Decode(&bobIntervals); err != nil {
+		t.Fatalf("decode bob intervals: %v", err)
+	}
+	if len(bobIntervals) != 1 || bobIntervals[0].Name != "Bob Trip" {
+		t.Fatalf("expected only Bob interval, got %#v", bobIntervals)
+	}
+
+	updateBobFromAlice := performRequest(t, router, http.MethodPut, "/api/intervals/2", `{
+		"name":"Stolen",
+		"start_date":"2026-06-20",
+		"end_date":"2026-06-22",
+		"color":"#000000"
+	}`, aliceCookie)
+	if updateBobFromAlice.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 updating another user's interval, got %d", updateBobFromAlice.Code)
+	}
+
+	deleteAliceFromBob := performRequest(t, router, http.MethodDelete, "/api/intervals/1", "", bobCookie)
+	if deleteAliceFromBob.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 deleting another user's interval, got %d", deleteAliceFromBob.Code)
+	}
+}
+
+func TestCreateIntervalRejectsUnknownFields(t *testing.T) {
+	_, router := newTestServer(t)
+
+	cookie, _ := registerUser(t, router, "alice", "password123")
+
+	rec := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 		"name":"Trip",
 		"start_date":"2026-05-20",
 		"end_date":"2026-05-21",
 		"unexpected":true
-	}`))
-	rec := httptest.NewRecorder()
-
-	h.createInterval(rec, req)
+	}`, cookie)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
-	}
-}
-
-func TestUpdateIntervalReturnsNotFound(t *testing.T) {
-	db := openTestDB(t)
-	if err := initDB(db); err != nil {
-		t.Fatalf("init db: %v", err)
-	}
-
-	h := &handler{db: db}
-	r := chi.NewRouter()
-	r.Put("/api/intervals/{id}", h.updateInterval)
-
-	req := httptest.NewRequest(http.MethodPut, "/api/intervals/999", strings.NewReader(`{
-		"name":"Trip",
-		"start_date":"2026-05-20",
-		"end_date":"2026-05-21"
-	}`))
-	rec := httptest.NewRecorder()
-
-	r.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d", rec.Code)
-	}
-}
-
-func TestDeleteIntervalReturnsNotFound(t *testing.T) {
-	db := openTestDB(t)
-	if err := initDB(db); err != nil {
-		t.Fatalf("init db: %v", err)
-	}
-
-	h := &handler{db: db}
-	r := chi.NewRouter()
-	r.Delete("/api/intervals/{id}", h.deleteInterval)
-
-	req := httptest.NewRequest(http.MethodDelete, "/api/intervals/999", nil)
-	rec := httptest.NewRecorder()
-
-	r.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d", rec.Code)
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"log"
 	"net/http"
 	"os"
@@ -8,7 +9,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	_ "modernc.org/sqlite"
-	"database/sql"
 )
 
 func main() {
@@ -27,20 +27,12 @@ func main() {
 		log.Fatalf("init db: %v", err)
 	}
 
-	h := &handler{db: db}
+	h := &handler{
+		db:           db,
+		cookieSecure: os.Getenv("COOKIE_SECURE") == "true",
+	}
 
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-
-	r.Route("/api/intervals", func(r chi.Router) {
-		r.Get("/", h.listIntervals)
-		r.Post("/", h.createInterval)
-		r.Put("/{id}", h.updateInterval)
-		r.Delete("/{id}", h.deleteInterval)
-	})
-
-	r.Handle("/*", http.FileServer(http.Dir("static")))
+	r := newRouter(h)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -48,4 +40,26 @@ func main() {
 	}
 	log.Printf("listening on :%s", port)
 	log.Fatal(http.ListenAndServe(":"+port, r))
+}
+
+func newRouter(h *handler) http.Handler {
+	r := chi.NewRouter()
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+
+	r.Post("/api/register", h.register)
+	r.Post("/api/login", h.login)
+	r.Post("/api/logout", h.logout)
+	r.Get("/api/me", h.currentUser)
+
+	r.Route("/api/intervals", func(r chi.Router) {
+		r.Use(authMiddleware(h))
+		r.Get("/", h.listIntervals)
+		r.Post("/", h.createInterval)
+		r.Put("/{id}", h.updateInterval)
+		r.Delete("/{id}", h.deleteInterval)
+	})
+
+	r.Handle("/*", http.FileServer(http.Dir("static")))
+	return r
 }

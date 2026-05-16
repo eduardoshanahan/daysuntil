@@ -13,11 +13,44 @@
 <body>
   <header>
     <h1>Days Until</h1>
-    <button id="btn-add" class="btn-primary">+ Add</button>
+    <div class="header-actions">
+      <span id="user-badge" class="user-badge hidden"></span>
+      <button id="btn-logout" type="button" class="btn-secondary hidden">Log out</button>
+      <button id="btn-add" class="btn-primary hidden">+ Add</button>
+    </div>
   </header>
 
-  <main id="interval-list">
-    <p id="loading-msg" class="empty-msg">Loading intervals...</p>
+  <section id="auth-view" class="auth-shell hidden" aria-live="polite">
+    <div class="auth-card">
+      <p id="auth-kicker" class="auth-kicker">Login</p>
+      <h2 id="auth-title">Sign in to your account</h2>
+      <p id="auth-subtitle" class="auth-subtitle">Your intervals stay private to your account.</p>
+
+      <form id="auth-form" class="auth-form" novalidate>
+        <label for="auth-username">Username</label>
+        <input type="text" id="auth-username" autocomplete="username" required />
+
+        <label for="auth-password">Password</label>
+        <input type="password" id="auth-password" autocomplete="current-password" required />
+
+        <p id="auth-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
+
+        <div class="auth-actions">
+          <button id="auth-submit" type="submit" class="btn-primary">Log in</button>
+        </div>
+      </form>
+
+      <p class="auth-switch-copy">
+        <span id="auth-switch-label">Need an account?</span>
+        <button id="auth-switch" type="button" class="btn-link">Create one</button>
+      </p>
+    </div>
+  </section>
+
+  <main id="app-view" class="hidden">
+    <section id="interval-list">
+      <p id="loading-msg" class="empty-msg">Loading intervals...</p>
+    </section>
   </main>
 
   <section id="app-status" class="app-status hidden" role="status" aria-live="polite">

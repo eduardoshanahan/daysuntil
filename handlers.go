@@ -14,11 +14,18 @@ import (
 )
 
 type handler struct {
-	db *sql.DB
+	db           *sql.DB
+	cookieSecure bool
 }
 
 func (h *handler) listIntervals(w http.ResponseWriter, r *http.Request) {
-	intervals, err := listIntervals(h.db)
+	user, err := userFromContext(r.Context())
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	intervals, err := listIntervals(h.db, user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -30,6 +37,12 @@ func (h *handler) listIntervals(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) createInterval(w http.ResponseWriter, r *http.Request) {
+	user, err := userFromContext(r.Context())
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var iv Interval
 	if err := decodeJSONBody(w, r, &iv); err != nil {
 		return
@@ -38,7 +51,7 @@ func (h *handler) createInterval(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	created, err := createInterval(h.db, iv)
+	created, err := createInterval(h.db, user.ID, iv)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -48,6 +61,12 @@ func (h *handler) createInterval(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) updateInterval(w http.ResponseWriter, r *http.Request) {
+	user, err := userFromContext(r.Context())
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
@@ -61,7 +80,7 @@ func (h *handler) updateInterval(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := updateInterval(h.db, id, iv); err != nil {
+	if err := updateInterval(h.db, user.ID, id, iv); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
@@ -74,12 +93,18 @@ func (h *handler) updateInterval(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) deleteInterval(w http.ResponseWriter, r *http.Request) {
+	user, err := userFromContext(r.Context())
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	if err := deleteInterval(h.db, id); err != nil {
+	if err := deleteInterval(h.db, user.ID, id); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
@@ -88,6 +113,69 @@ func (h *handler) deleteInterval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) register(w http.ResponseWriter, r *http.Request) {
+	var creds userCredentials
+	if err := decodeJSONBody(w, r, &creds); err != nil {
+		return
+	}
+
+	user, err := createUser(h.db, creds)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	token, expiresAt, err := createSession(h.db, user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	setSessionCookie(w, token, expiresAt, h.cookieSecure)
+	writeJSON(w, user)
+}
+
+func (h *handler) login(w http.ResponseWriter, r *http.Request) {
+	var creds userCredentials
+	if err := decodeJSONBody(w, r, &creds); err != nil {
+		return
+	}
+
+	user, err := authenticateUser(h.db, creds)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	token, expiresAt, err := createSession(h.db, user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	setSessionCookie(w, token, expiresAt, h.cookieSecure)
+	writeJSON(w, user)
+}
+
+func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err == nil {
+		_ = deleteSession(h.db, cookie.Value)
+	}
+
+	clearSessionCookie(w, h.cookieSecure)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) currentUser(w http.ResponseWriter, r *http.Request) {
+	user, err := authenticatedUser(h.db, r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, user)
 }
 
 func validateInterval(iv Interval) error {

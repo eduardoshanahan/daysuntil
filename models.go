@@ -17,12 +17,18 @@ type Interval struct {
 var ErrNotFound = errors.New("interval not found")
 
 func initDB(db *sql.DB) error {
+	if err := initAuthDB(db); err != nil {
+		return err
+	}
+
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS intervals (
 		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id    INTEGER,
 		name       TEXT NOT NULL,
 		start_date TEXT NOT NULL,
 		end_date   TEXT NOT NULL,
-		color      TEXT NOT NULL DEFAULT '#4f8ef7'
+		color      TEXT NOT NULL DEFAULT '#4f8ef7',
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 	)`)
 	if err != nil {
 		return err
@@ -39,11 +45,33 @@ func initDB(db *sql.DB) error {
 		}
 	}
 
+	hasUserColumn, err := intervalColumnExists(db, "user_id")
+	if err != nil {
+		return err
+	}
+	if !hasUserColumn {
+		_, err = db.Exec(`ALTER TABLE intervals ADD COLUMN user_id INTEGER`)
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_intervals_user_id_start_date ON intervals(user_id, start_date)`)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
-func listIntervals(db *sql.DB) ([]Interval, error) {
-	rows, err := db.Query(`SELECT id, name, start_date, end_date, color FROM intervals ORDER BY start_date`)
+func listIntervals(db *sql.DB, userID int64) ([]Interval, error) {
+	rows, err := db.Query(
+		`SELECT id, name, start_date, end_date, color
+		FROM intervals
+		WHERE user_id=?
+		ORDER BY start_date`,
+		userID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -60,13 +88,13 @@ func listIntervals(db *sql.DB) ([]Interval, error) {
 	return intervals, rows.Err()
 }
 
-func createInterval(db *sql.DB, iv Interval) (Interval, error) {
+func createInterval(db *sql.DB, userID int64, iv Interval) (Interval, error) {
 	if iv.Color == "" {
 		iv.Color = "#4f8ef7"
 	}
 	res, err := db.Exec(
-		`INSERT INTO intervals (name, start_date, end_date, color) VALUES (?, ?, ?, ?)`,
-		iv.Name, iv.StartDate, iv.EndDate, iv.Color,
+		`INSERT INTO intervals (user_id, name, start_date, end_date, color) VALUES (?, ?, ?, ?, ?)`,
+		userID, iv.Name, iv.StartDate, iv.EndDate, iv.Color,
 	)
 	if err != nil {
 		return Interval{}, err
@@ -75,13 +103,13 @@ func createInterval(db *sql.DB, iv Interval) (Interval, error) {
 	return iv, nil
 }
 
-func updateInterval(db *sql.DB, id int64, iv Interval) error {
+func updateInterval(db *sql.DB, userID, id int64, iv Interval) error {
 	if iv.Color == "" {
 		iv.Color = "#4f8ef7"
 	}
 	res, err := db.Exec(
-		`UPDATE intervals SET name=?, start_date=?, end_date=?, color=? WHERE id=?`,
-		iv.Name, iv.StartDate, iv.EndDate, iv.Color, id,
+		`UPDATE intervals SET name=?, start_date=?, end_date=?, color=? WHERE id=? AND user_id=?`,
+		iv.Name, iv.StartDate, iv.EndDate, iv.Color, id, userID,
 	)
 	if err != nil {
 		return err
@@ -96,8 +124,8 @@ func updateInterval(db *sql.DB, id int64, iv Interval) error {
 	return nil
 }
 
-func deleteInterval(db *sql.DB, id int64) error {
-	res, err := db.Exec(`DELETE FROM intervals WHERE id=?`, id)
+func deleteInterval(db *sql.DB, userID, id int64) error {
+	res, err := db.Exec(`DELETE FROM intervals WHERE id=? AND user_id=?`, id, userID)
 	if err != nil {
 		return err
 	}
