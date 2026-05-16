@@ -72,7 +72,9 @@ Recommended approaches:
 
 The app reads the secret only from environment variables at runtime.
 
-### Local development
+## Development
+
+### Local run
 
 Requires a Nix dev shell:
 
@@ -83,7 +85,21 @@ go run .
 
 The app will be available at `http://localhost:8080`.
 
-For local GitHub OAuth testing:
+By default, local data is stored in:
+
+```text
+./daysuntil.db
+```
+
+If you want a separate database for a specific run:
+
+```bash
+DB_PATH=/tmp/daysuntil-dev.db nix develop -c go run .
+```
+
+### Local GitHub OAuth testing
+
+Keep local username/password login enabled and add GitHub OAuth on top:
 
 ```bash
 export BASE_URL=http://localhost:8080
@@ -96,6 +112,37 @@ Then configure this callback URL in the GitHub OAuth App:
 
 ```text
 http://localhost:8080/api/oauth/github/callback
+```
+
+### Verification
+
+Run the backend and frontend checks from the dev shell:
+
+```bash
+nix develop -c go test ./...
+nix develop -c go build ./...
+nix develop -c node --check static/app.js
+```
+
+### Useful dev tools
+
+The Nix dev shell also includes a few local debugging tools:
+
+- `sqlite3` for inspecting the local database
+- `lsof` and `fuser` for checking or clearing busy ports
+- `ss` and `ps` for socket/process inspection
+
+Examples:
+
+```bash
+# See what is listening on port 8080
+nix develop -c lsof -iTCP:8080 -sTCP:LISTEN -n -P
+
+# Kill whatever is listening on port 8080
+nix develop -c fuser -k 8080/tcp
+
+# Inspect the local database
+nix develop -c sqlite3 daysuntil.db
 ```
 
 ## Stack

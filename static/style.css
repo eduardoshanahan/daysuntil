@@ -46,6 +46,15 @@ header h1 {
   text-align: center;
 }
 
+.title-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.title-link:hover {
+  text-decoration: underline;
+}
+
 header #btn-add {
   justify-self: end;
 }
