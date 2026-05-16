@@ -243,11 +243,14 @@ function setCurrentUser(user) {
   if (isAuthenticated) {
     userBadge.textContent = user.display_name || user.username;
     profileDisplayName.value = user.display_name || user.username;
-    profileLink.textContent = `${window.location.origin}/u/${user.username}`;
+    profileLink.href = `${window.location.origin}/u/${user.username}`;
+    profileLink.textContent = profileLink.href;
     authPassword.value = '';
     clearAuthError();
   } else {
     userBadge.textContent = '';
+    profileLink.removeAttribute('href');
+    profileLink.textContent = '';
     btnAdd.disabled = false;
     closeModal(true);
   }

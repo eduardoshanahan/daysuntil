@@ -88,6 +88,10 @@ header #btn-add {
   margin-bottom: 1.1rem;
 }
 
+.profile-panel {
+  margin-top: 1.1rem;
+}
+
 .profile-kicker {
   color: var(--accent);
   font-size: 0.76rem;

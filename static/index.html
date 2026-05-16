@@ -57,10 +57,20 @@
   </section>
 
   <main id="app-view" class="hidden">
+    <section id="public-profile-header" class="public-profile-header hidden">
+      <p class="profile-kicker">Public profile</p>
+      <h2 id="public-profile-name"></h2>
+      <p id="public-profile-username" class="public-profile-username"></p>
+    </section>
+
+    <section id="interval-list">
+      <p id="loading-msg" class="empty-msg">Loading intervals...</p>
+    </section>
+
     <section id="profile-panel" class="profile-panel hidden">
       <div>
         <p class="profile-kicker">Public profile</p>
-        <p id="profile-link" class="profile-link"></p>
+        <p><a id="profile-link" class="profile-link" target="_blank" rel="noopener noreferrer"></a></p>
       </div>
       <form id="profile-form" class="profile-form" novalidate>
         <label for="profile-display-name">Display name</label>
@@ -70,16 +80,6 @@
         </div>
         <p id="profile-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
       </form>
-    </section>
-
-    <section id="public-profile-header" class="public-profile-header hidden">
-      <p class="profile-kicker">Public profile</p>
-      <h2 id="public-profile-name"></h2>
-      <p id="public-profile-username" class="public-profile-username"></p>
-    </section>
-
-    <section id="interval-list">
-      <p id="loading-msg" class="empty-msg">Loading intervals...</p>
     </section>
   </main>
 
@@ -119,6 +119,20 @@
             <button type="button" class="swatch" data-color="#f5a623" style="background:#f5a623" aria-label="Use orange color"></button>
             <button type="button" class="swatch" data-color="#b47cf7" style="background:#b47cf7" aria-label="Use violet color"></button>
             <button type="button" class="swatch" data-color="#40c4c4" style="background:#40c4c4" aria-label="Use teal color"></button>
+            <button type="button" class="swatch" data-color="#f06292" style="background:#f06292" aria-label="Use pink color"></button>
+            <button type="button" class="swatch" data-color="#8d6e63" style="background:#8d6e63" aria-label="Use brown color"></button>
+            <button type="button" class="swatch" data-color="#9ccc65" style="background:#9ccc65" aria-label="Use lime color"></button>
+            <button type="button" class="swatch" data-color="#ffd54f" style="background:#ffd54f" aria-label="Use amber color"></button>
+            <button type="button" class="swatch" data-color="#7986cb" style="background:#7986cb" aria-label="Use indigo color"></button>
+            <button type="button" class="swatch" data-color="#90a4ae" style="background:#90a4ae" aria-label="Use slate color"></button>
+            <button type="button" class="swatch" data-color="#26a69a" style="background:#26a69a" aria-label="Use sea green color"></button>
+            <button type="button" class="swatch" data-color="#ef5350" style="background:#ef5350" aria-label="Use coral red color"></button>
+            <button type="button" class="swatch" data-color="#ab47bc" style="background:#ab47bc" aria-label="Use orchid color"></button>
+            <button type="button" class="swatch" data-color="#5c6bc0" style="background:#5c6bc0" aria-label="Use royal blue color"></button>
+            <button type="button" class="swatch" data-color="#29b6f6" style="background:#29b6f6" aria-label="Use sky blue color"></button>
+            <button type="button" class="swatch" data-color="#ff8a65" style="background:#ff8a65" aria-label="Use peach color"></button>
+            <button type="button" class="swatch" data-color="#66bb6a" style="background:#66bb6a" aria-label="Use leaf green color"></button>
+            <button type="button" class="swatch" data-color="#b0bec5" style="background:#b0bec5" aria-label="Use light slate color"></button>
           </span>
         </div>
 
