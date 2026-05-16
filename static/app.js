@@ -1,8 +1,22 @@
 'use strict';
 
+const routePath = window.location.pathname;
+const publicMatch = routePath.match(/^\/u\/([^/]+)$/);
+const publicUsername = publicMatch ? decodeURIComponent(publicMatch[1]).toLowerCase() : '';
+const isPublicView = publicUsername !== '';
+
 const authView = document.getElementById('auth-view');
 const appView = document.getElementById('app-view');
 const list = document.getElementById('interval-list');
+const profilePanel = document.getElementById('profile-panel');
+const profileForm = document.getElementById('profile-form');
+const profileDisplayName = document.getElementById('profile-display-name');
+const profileSave = document.getElementById('profile-save');
+const profileError = document.getElementById('profile-error');
+const profileLink = document.getElementById('profile-link');
+const publicProfileHeader = document.getElementById('public-profile-header');
+const publicProfileName = document.getElementById('public-profile-name');
+const publicProfileUsername = document.getElementById('public-profile-username');
 const overlay = document.getElementById('modal-overlay');
 const form = document.getElementById('interval-form');
 const modalTitle = document.getElementById('modal-title');
@@ -11,6 +25,7 @@ const fieldName = document.getElementById('field-name');
 const fieldStart = document.getElementById('field-start');
 const fieldEnd = document.getElementById('field-end');
 const fieldColor = document.getElementById('field-color');
+const fieldVisibility = document.getElementById('field-visibility');
 const btnPickStart = document.getElementById('btn-pick-start');
 const btnPickEnd = document.getElementById('btn-pick-end');
 const formError = document.getElementById('form-error');
@@ -45,6 +60,7 @@ const authGithub = document.getElementById('auth-github');
 
 let isSubmitting = false;
 let isAuthSubmitting = false;
+let isProfileSubmitting = false;
 let isRegisterMode = false;
 let activeLoadToken = 0;
 const pendingDeleteIds = new Set();
@@ -83,6 +99,7 @@ async function apiFetch(path, options = {}) {
 const api = {
   providers: () => apiFetch('/api/auth/providers'),
   me: () => apiFetch('/api/me'),
+  updateProfile: data => apiFetch('/api/me/profile', { method: 'PUT', body: JSON.stringify(data) }),
   register: data => apiFetch('/api/register', { method: 'POST', body: JSON.stringify(data) }),
   login: data => apiFetch('/api/login', { method: 'POST', body: JSON.stringify(data) }),
   logout: () => apiFetch('/api/logout', { method: 'POST' }),
@@ -90,6 +107,7 @@ const api = {
   create: data => apiFetch('/api/intervals', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => apiFetch(`/api/intervals/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: id => apiFetch(`/api/intervals/${id}`, { method: 'DELETE' }),
+  publicProfile: username => apiFetch(`/api/public/users/${encodeURIComponent(username)}`),
 };
 
 function today() {
@@ -152,9 +170,15 @@ function statusLabel(status, progress) {
   return 'in progress';
 }
 
-function renderCard(iv) {
+function escHtml(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function renderCard(iv, options = {}) {
   const progress = computeProgress(iv);
   const isDeleting = pendingDeleteIds.has(iv.id);
+  const showActions = options.showActions === true;
+  const showVisibility = options.showVisibility === true;
 
   const card = document.createElement('div');
   card.className = 'card';
@@ -163,7 +187,6 @@ function renderCard(iv) {
   const pastText = progress.status === 'upcoming'
     ? '0 days past'
     : `${progress.past} day${progress.past !== 1 ? 's' : ''} past`;
-
   const leftText = progress.status === 'ended'
     ? '0 days left'
     : `${progress.left} day${progress.left !== 1 ? 's' : ''} left`;
@@ -171,16 +194,24 @@ function renderCard(iv) {
   const color = iv.color || '#4f8ef7';
   card.style.setProperty('--card-color', color);
 
+  const visibilityBadge = showVisibility
+    ? `<span class="status-badge ${iv.visibility === 'public' ? 'active' : 'upcoming'}">${iv.visibility}</span>`
+    : '';
+
+  const actions = showActions
+    ? `<div class="card-actions">
+        <button class="btn-icon btn-edit" title="Edit" aria-label="Edit ${escHtml(iv.name)}" ${isDeleting ? 'disabled' : ''}>Edit</button>
+        <button class="btn-icon danger btn-delete" title="Delete" aria-label="${isDeleting ? `Deleting ${escHtml(iv.name)}` : `Delete ${escHtml(iv.name)}`}" ${isDeleting ? 'disabled' : ''}>${isDeleting ? 'Deleting...' : 'Delete'}</button>
+      </div>`
+    : '';
+
   card.innerHTML = `
     <div class="card-header">
       <div>
-        <div class="card-name">${escHtml(iv.name)} <span class="status-badge ${progress.status}">${statusLabel(progress.status, progress)}</span></div>
+        <div class="card-name">${escHtml(iv.name)} ${visibilityBadge}<span class="status-badge ${progress.status}">${statusLabel(progress.status, progress)}</span></div>
         <div class="card-dates">${formatDate(iv.start_date)} &ndash; ${formatDate(iv.end_date)} <span class="total-days">${progress.total} days</span></div>
       </div>
-      <div class="card-actions">
-        <button class="btn-icon btn-edit" title="Edit" aria-label="Edit ${escHtml(iv.name)}" ${isDeleting ? 'disabled' : ''}>Edit</button>
-        <button class="btn-icon danger btn-delete" title="Delete" aria-label="${isDeleting ? `Deleting ${escHtml(iv.name)}` : `Delete ${escHtml(iv.name)}`}" ${isDeleting ? 'disabled' : ''}>${isDeleting ? 'Deleting...' : 'Delete'}</button>
-      </div>
+      ${actions}
     </div>
     <div class="progress-row">
       <span class="day-label past">${pastText}</span>
@@ -189,28 +220,30 @@ function renderCard(iv) {
     </div>
   `;
 
-  card.querySelector('.btn-edit').addEventListener('click', () => openEdit(iv));
-  card.querySelector('.btn-delete').addEventListener('click', () => confirmDelete(iv));
+  if (showActions) {
+    card.querySelector('.btn-edit').addEventListener('click', () => openEdit(iv));
+    card.querySelector('.btn-delete').addEventListener('click', () => confirmDelete(iv));
+  }
 
   return card;
-}
-
-function escHtml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function setCurrentUser(user) {
   currentUser = user;
   const isAuthenticated = Boolean(user);
 
-  authView.classList.toggle('hidden', isAuthenticated);
-  appView.classList.toggle('hidden', !isAuthenticated);
-  btnAdd.classList.toggle('hidden', !isAuthenticated);
-  btnLogout.classList.toggle('hidden', !isAuthenticated);
-  userBadge.classList.toggle('hidden', !isAuthenticated);
+  authView.classList.toggle('hidden', isAuthenticated || isPublicView);
+  appView.classList.toggle('hidden', !isAuthenticated && !isPublicView);
+  btnAdd.classList.toggle('hidden', !isAuthenticated || isPublicView);
+  btnLogout.classList.toggle('hidden', !isAuthenticated || isPublicView);
+  userBadge.classList.toggle('hidden', !isAuthenticated || isPublicView);
+  profilePanel.classList.toggle('hidden', !isAuthenticated || isPublicView);
+  publicProfileHeader.classList.toggle('hidden', !isPublicView);
 
   if (isAuthenticated) {
-    userBadge.textContent = user.username;
+    userBadge.textContent = user.display_name || user.username;
+    profileDisplayName.value = user.display_name || user.username;
+    profileLink.textContent = `${window.location.origin}/u/${user.username}`;
     authPassword.value = '';
     clearAuthError();
   } else {
@@ -220,10 +253,18 @@ function setCurrentUser(user) {
   }
 }
 
+function renderIntervals(intervals, options = {}) {
+  list.innerHTML = '';
+  if (!intervals.length) {
+    list.innerHTML = `<p class="empty-msg">${options.emptyMessage || 'No intervals yet.'}</p>`;
+    return;
+  }
+  intervals.forEach(iv => list.appendChild(renderCard(iv, options)));
+}
+
 async function loadIntervals(options = {}) {
   const preserveStatus = options.preserveStatus === true;
   const loadToken = ++activeLoadToken;
-
   if (!currentUser) return;
 
   if (!list.children.length) {
@@ -233,15 +274,11 @@ async function loadIntervals(options = {}) {
   try {
     const intervals = await api.list();
     if (loadToken !== activeLoadToken) return;
-
-    list.innerHTML = '';
-    if (!intervals.length) {
-      list.innerHTML = '<p class="empty-msg">No intervals yet. Add your first one above.</p>';
-      if (!preserveStatus) clearStatus();
-      return;
-    }
-
-    intervals.forEach(iv => list.appendChild(renderCard(iv)));
+    renderIntervals(intervals, {
+      showActions: true,
+      showVisibility: true,
+      emptyMessage: 'No intervals yet. Add your first one above.',
+    });
     if (!preserveStatus) clearStatus();
   } catch (err) {
     if (loadToken !== activeLoadToken) return;
@@ -256,12 +293,34 @@ async function loadIntervals(options = {}) {
   }
 }
 
+async function loadPublicProfile() {
+  list.innerHTML = '<p class="empty-msg">Loading public profile...</p>';
+  try {
+    const profile = await api.publicProfile(publicUsername);
+    document.title = `${profile.display_name || profile.username} | Days Until`;
+    publicProfileName.textContent = profile.display_name || profile.username;
+    publicProfileUsername.textContent = `@${profile.username}`;
+    renderIntervals(profile.intervals || [], {
+      showActions: false,
+      showVisibility: false,
+      emptyMessage: 'No public intervals to show yet.',
+    });
+    clearStatus();
+  } catch (err) {
+    list.innerHTML = `<p class="empty-msg">${err.status === 404 ? 'Public profile not found.' : 'Unable to load public profile.'}</p>`;
+    if (err.status !== 404) {
+      showStatus(err.message, { tone: 'error' });
+    }
+  }
+}
+
 function openAdd() {
   lastFocusedElement = document.activeElement;
   modalTitle.textContent = 'Add Interval';
   fieldId.value = '';
   form.reset();
   fieldColor.value = '#4f8ef7';
+  fieldVisibility.value = 'private';
   hideError();
   document.body.classList.add('modal-open');
   overlay.classList.remove('hidden');
@@ -276,6 +335,7 @@ function openEdit(iv) {
   fieldStart.value = iv.start_date;
   fieldEnd.value = iv.end_date;
   fieldColor.value = iv.color || '#4f8ef7';
+  fieldVisibility.value = iv.visibility || 'private';
   hideError();
   document.body.classList.add('modal-open');
   overlay.classList.remove('hidden');
@@ -302,6 +362,16 @@ function hideError() {
   formError.classList.add('hidden');
 }
 
+function showProfileError(message) {
+  profileError.textContent = message;
+  profileError.classList.remove('hidden');
+}
+
+function clearProfileError() {
+  profileError.textContent = '';
+  profileError.classList.add('hidden');
+}
+
 function openDatePicker(field) {
   activeDateField = field;
   const currentValue = field.value;
@@ -318,7 +388,6 @@ function hideDatePicker() {
 
 function renderDatePicker() {
   if (!visibleMonth) return;
-
   datePickerTitle.textContent = monthLabel(visibleMonth);
   datePickerGrid.innerHTML = '';
 
@@ -337,17 +406,9 @@ function renderDatePicker() {
     button.className = 'date-day';
     button.textContent = `${date.getDate()}`;
     button.dataset.value = formatISODate(date);
-
-    if (date.getMonth() !== month) {
-      button.classList.add('muted');
-    }
-    if (button.dataset.value === todayValue) {
-      button.classList.add('today');
-    }
-    if (button.dataset.value === selectedValue) {
-      button.classList.add('selected');
-    }
-
+    if (date.getMonth() !== month) button.classList.add('muted');
+    if (button.dataset.value === todayValue) button.classList.add('today');
+    if (button.dataset.value === selectedValue) button.classList.add('selected');
     button.addEventListener('click', () => {
       if (!activeDateField) return;
       activeDateField.value = button.dataset.value;
@@ -355,7 +416,6 @@ function renderDatePicker() {
       hideDatePicker();
       activeDateField.focus();
     });
-
     datePickerGrid.appendChild(button);
   }
 }
@@ -375,8 +435,8 @@ function setAuthMode(registerMode) {
   authKicker.textContent = registerMode ? 'Create account' : 'Login';
   authTitle.textContent = registerMode ? 'Create your account' : 'Sign in to your account';
   authSubtitle.textContent = registerMode
-    ? 'Each account gets its own private interval list.'
-    : 'Your intervals stay private to your account.';
+    ? 'Each account gets its own private interval list, with optional public cards.'
+    : 'Your intervals stay private unless you mark them public.';
   authSubmit.textContent = registerMode ? 'Create account' : 'Log in';
   authSwitchLabel.textContent = registerMode ? 'Already have an account?' : 'Need an account?';
   authSwitch.textContent = registerMode ? 'Log in instead' : 'Create one';
@@ -394,6 +454,12 @@ function setAuthSubmitting(nextValue) {
   authGithub.setAttribute('aria-disabled', nextValue ? 'true' : 'false');
 }
 
+function setProfileSubmitting(nextValue) {
+  isProfileSubmitting = nextValue;
+  profileSave.disabled = nextValue;
+  profileDisplayName.disabled = nextValue;
+}
+
 function setSubmitting(nextValue) {
   isSubmitting = nextValue;
   btnSave.disabled = nextValue;
@@ -407,9 +473,7 @@ function showStatus(message, options = {}) {
   appStatus.classList.remove('hidden', 'error');
   appStatus.setAttribute('role', options.tone === 'error' ? 'alert' : 'status');
   appStatus.setAttribute('aria-live', options.tone === 'error' ? 'assertive' : 'polite');
-  if (options.tone === 'error') {
-    appStatus.classList.add('error');
-  }
+  if (options.tone === 'error') appStatus.classList.add('error');
   btnRetry.classList.toggle('hidden', !options.retry);
 }
 
@@ -423,20 +487,15 @@ function clearStatus() {
 }
 
 function trapModalFocus(event) {
-  const focusable = overlay.querySelectorAll(
-    'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
-  );
+  const focusable = overlay.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])');
   if (!focusable.length) return;
-
   const first = focusable[0];
   const last = focusable[focusable.length - 1];
-
   if (event.shiftKey && document.activeElement === first) {
     event.preventDefault();
     last.focus();
     return;
   }
-
   if (!event.shiftKey && document.activeElement === last) {
     event.preventDefault();
     first.focus();
@@ -484,13 +543,17 @@ btnLogout.addEventListener('click', async () => {
   try {
     await api.logout();
   } catch {
-    // Clear local state even if logout cleanup fails server-side.
+    // Keep going even if server-side cleanup fails.
   }
   handleUnauthorized('Logged out.');
 });
 btnRetry.addEventListener('click', () => {
   clearStatus();
-  loadIntervals();
+  if (isPublicView) {
+    loadPublicProfile();
+  } else {
+    loadIntervals();
+  }
 });
 authSwitch.addEventListener('click', () => {
   setAuthMode(!isRegisterMode);
@@ -499,36 +562,28 @@ authSwitch.addEventListener('click', () => {
 overlay.addEventListener('click', event => {
   if (event.target === overlay) closeModal();
 });
-
 datePrev.addEventListener('click', () => {
   if (!visibleMonth) return;
   visibleMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() - 1, 1);
   renderDatePicker();
 });
-
 dateNext.addEventListener('click', () => {
   if (!visibleMonth) return;
   visibleMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1);
   renderDatePicker();
 });
-
 btnPickStart.addEventListener('click', () => openDatePicker(fieldStart));
 btnPickEnd.addEventListener('click', () => openDatePicker(fieldEnd));
 fieldStart.addEventListener('focus', () => openDatePicker(fieldStart));
 fieldEnd.addEventListener('focus', () => openDatePicker(fieldEnd));
-
 document.addEventListener('click', event => {
   if (datePicker.classList.contains('hidden')) return;
   const clickedInsidePicker = datePicker.contains(event.target);
-  const clickedTrigger = event.target === fieldStart
-    || event.target === fieldEnd
-    || event.target === btnPickStart
-    || event.target === btnPickEnd;
+  const clickedTrigger = [fieldStart, fieldEnd, btnPickStart, btnPickEnd].includes(event.target);
   if (!clickedInsidePicker && !clickedTrigger) {
     hideDatePicker();
   }
 });
-
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeModal();
   if (event.key === 'Tab' && !overlay.classList.contains('hidden')) trapModalFocus(event);
@@ -539,18 +594,10 @@ authForm.addEventListener('submit', async event => {
   if (isAuthSubmitting) return;
 
   clearAuthError();
-
   const username = authUsername.value.trim();
   const password = authPassword.value;
-
-  if (!username) {
-    showAuthError('Username is required.');
-    return;
-  }
-  if (!password) {
-    showAuthError('Password is required.');
-    return;
-  }
+  if (!username) return showAuthError('Username is required.');
+  if (!password) return showAuthError('Password is required.');
 
   try {
     setAuthSubmitting(true);
@@ -568,6 +615,30 @@ authForm.addEventListener('submit', async event => {
   }
 });
 
+profileForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (isProfileSubmitting || !currentUser) return;
+
+  clearProfileError();
+  const displayName = profileDisplayName.value.trim();
+  if (!displayName) return showProfileError('Display name is required.');
+
+  try {
+    setProfileSubmitting(true);
+    const updatedUser = await api.updateProfile({ display_name: displayName });
+    setCurrentUser(updatedUser);
+    showStatus('Display name updated.', { tone: 'status' });
+  } catch (err) {
+    if (err.status === 401) {
+      handleUnauthorized('Your session has ended. Log in again.');
+      return;
+    }
+    showProfileError(err.message);
+  } finally {
+    setProfileSubmitting(false);
+  }
+});
+
 form.addEventListener('submit', async event => {
   event.preventDefault();
   if (isSubmitting) return;
@@ -576,33 +647,16 @@ form.addEventListener('submit', async event => {
   const name = fieldName.value.trim();
   const start = fieldStart.value;
   const end = fieldEnd.value;
+  const visibility = fieldVisibility.value;
 
-  if (!name) {
-    showError('Name is required.');
-    return;
-  }
-  if (!start) {
-    showError('Start date is required.');
-    return;
-  }
-  if (!end) {
-    showError('End date is required.');
-    return;
-  }
-  if (!isValidISODate(start)) {
-    showError('Start date must be in YYYY-MM-DD format.');
-    return;
-  }
-  if (!isValidISODate(end)) {
-    showError('End date must be in YYYY-MM-DD format.');
-    return;
-  }
-  if (start >= end) {
-    showError('End date must be after start date.');
-      return;
-  }
+  if (!name) return showError('Name is required.');
+  if (!start) return showError('Start date is required.');
+  if (!end) return showError('End date is required.');
+  if (!isValidISODate(start)) return showError('Start date must be in YYYY-MM-DD format.');
+  if (!isValidISODate(end)) return showError('End date must be in YYYY-MM-DD format.');
+  if (start >= end) return showError('End date must be after start date.');
 
-  const data = { name, start_date: start, end_date: end, color: fieldColor.value };
+  const data = { name, start_date: start, end_date: end, color: fieldColor.value, visibility };
 
   try {
     setSubmitting(true);
@@ -631,10 +685,10 @@ colorSwatches.addEventListener('click', event => {
   if (btn) fieldColor.value = btn.dataset.color;
 });
 
-async function init() {
+async function initPrivateApp() {
   setAuthMode(false);
   const params = new URLSearchParams(window.location.search);
-  const authError = params.get('auth_error');
+  const authErrorMessage = params.get('auth_error');
 
   try {
     const providers = await api.providers();
@@ -648,23 +702,31 @@ async function init() {
     setCurrentUser(user);
     await loadIntervals();
   } catch (err) {
-    if (err.status === 401) {
-      setCurrentUser(null);
-      authView.classList.remove('hidden');
-      if (authError) {
-        showAuthError(authError);
-        window.history.replaceState({}, '', window.location.pathname);
-      }
-      authUsername.focus();
-      return;
-    }
     setCurrentUser(null);
-    showAuthError(authError || err.message);
-    if (authError) {
+    authView.classList.remove('hidden');
+    if (authErrorMessage) {
+      showAuthError(authErrorMessage);
       window.history.replaceState({}, '', window.location.pathname);
+    } else if (err.status !== 401) {
+      showAuthError(err.message);
     }
     authUsername.focus();
   }
 }
 
-init();
+function initPublicView() {
+  authView.classList.add('hidden');
+  btnAdd.classList.add('hidden');
+  btnLogout.classList.add('hidden');
+  userBadge.classList.add('hidden');
+  profilePanel.classList.add('hidden');
+  publicProfileHeader.classList.remove('hidden');
+  appView.classList.remove('hidden');
+  loadPublicProfile();
+}
+
+if (isPublicView) {
+  initPublicView();
+} else {
+  initPrivateApp();
+}

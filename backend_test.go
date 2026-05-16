@@ -93,7 +93,7 @@ func TestInitDBAddsColumnsToLegacySchema(t *testing.T) {
 		t.Fatalf("init db: %v", err)
 	}
 
-	for _, column := range []string{"color", "user_id"} {
+	for _, column := range []string{"color", "user_id", "visibility"} {
 		exists, err := intervalColumnExists(db, column)
 		if err != nil {
 			t.Fatalf("check %s column: %v", column, err)
@@ -129,6 +129,9 @@ func TestRegisterAdoptsLegacyIntervalsForFirstUser(t *testing.T) {
 	cookie, user := registerUser(t, router, "alice", "password123")
 	if user.Username != "alice" {
 		t.Fatalf("expected username alice, got %q", user.Username)
+	}
+	if user.DisplayName != "alice" {
+		t.Fatalf("expected default display name alice, got %q", user.DisplayName)
 	}
 
 	rec := performRequest(t, router, http.MethodGet, "/api/intervals", "", cookie)
@@ -185,7 +188,8 @@ func TestUsersOnlySeeTheirOwnIntervals(t *testing.T) {
 		"name":"Alice Trip",
 		"start_date":"2026-05-20",
 		"end_date":"2026-05-21",
-		"color":"#4f8ef7"
+		"color":"#4f8ef7",
+		"visibility":"private"
 	}`, aliceCookie)
 	if createAlice.Code != http.StatusCreated {
 		t.Fatalf("create alice interval: expected 201, got %d (%s)", createAlice.Code, createAlice.Body.String())
@@ -195,7 +199,8 @@ func TestUsersOnlySeeTheirOwnIntervals(t *testing.T) {
 		"name":"Bob Trip",
 		"start_date":"2026-06-20",
 		"end_date":"2026-06-21",
-		"color":"#e05c5c"
+		"color":"#e05c5c",
+		"visibility":"public"
 	}`, bobCookie)
 	if createBob.Code != http.StatusCreated {
 		t.Fatalf("create bob interval: expected 201, got %d (%s)", createBob.Code, createBob.Body.String())
@@ -250,5 +255,70 @@ func TestCreateIntervalRejectsUnknownFields(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestUpdateDisplayName(t *testing.T) {
+	_, router := newTestServer(t)
+
+	cookie, _ := registerUser(t, router, "alice", "password123")
+	rec := performRequest(t, router, http.MethodPut, "/api/me/profile", `{"display_name":"Eduardo Shanahan"}`, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 updating profile, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	user := decodeUser(t, rec)
+	if user.DisplayName != "Eduardo Shanahan" {
+		t.Fatalf("expected updated display name, got %q", user.DisplayName)
+	}
+}
+
+func TestPublicProfileOnlyShowsPublicIntervals(t *testing.T) {
+	_, router := newTestServer(t)
+
+	cookie, _ := registerUser(t, router, "alice", "password123")
+
+	updateProfile := performRequest(t, router, http.MethodPut, "/api/me/profile", `{"display_name":"Alice Public"}`, cookie)
+	if updateProfile.Code != http.StatusOK {
+		t.Fatalf("expected 200 updating profile, got %d", updateProfile.Code)
+	}
+
+	privateInterval := performRequest(t, router, http.MethodPost, "/api/intervals", `{
+		"name":"Private Trip",
+		"start_date":"2026-05-20",
+		"end_date":"2026-05-21",
+		"color":"#4f8ef7",
+		"visibility":"private"
+	}`, cookie)
+	if privateInterval.Code != http.StatusCreated {
+		t.Fatalf("expected 201 creating private interval, got %d", privateInterval.Code)
+	}
+
+	publicInterval := performRequest(t, router, http.MethodPost, "/api/intervals", `{
+		"name":"Public Trip",
+		"start_date":"2026-06-20",
+		"end_date":"2026-06-21",
+		"color":"#e05c5c",
+		"visibility":"public"
+	}`, cookie)
+	if publicInterval.Code != http.StatusCreated {
+		t.Fatalf("expected 201 creating public interval, got %d", publicInterval.Code)
+	}
+
+	rec := performRequest(t, router, http.MethodGet, "/api/public/users/alice", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 loading public profile, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	var profile PublicProfile
+	if err := json.NewDecoder(rec.Body).Decode(&profile); err != nil {
+		t.Fatalf("decode public profile: %v", err)
+	}
+
+	if profile.DisplayName != "Alice Public" {
+		t.Fatalf("expected public display name, got %q", profile.DisplayName)
+	}
+	if len(profile.Intervals) != 1 || profile.Intervals[0].Name != "Public Trip" {
+		t.Fatalf("expected only public interval, got %#v", profile.Intervals)
 	}
 }

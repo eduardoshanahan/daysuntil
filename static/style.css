@@ -70,6 +70,64 @@ header #btn-add {
   width: 100%;
 }
 
+.profile-panel,
+.public-profile-header {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1rem 1.1rem;
+  margin-bottom: 1.1rem;
+}
+
+.profile-kicker {
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.35rem;
+}
+
+.profile-link,
+.public-profile-username {
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.public-profile-header h2 {
+  font-size: 1.5rem;
+  letter-spacing: -0.03em;
+}
+
+.profile-form {
+  margin-top: 0.85rem;
+}
+
+.profile-form label {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.profile-form-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.7rem;
+}
+
+.profile-form input,
+.modal select {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 0.65rem 0.8rem;
+  border-radius: 9px;
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
 .auth-shell {
   min-height: calc(100dvh - 88px);
   display: grid;
@@ -434,6 +492,8 @@ input:focus-visible {
 
 .modal input:focus { border-color: var(--accent); }
 .auth-form input:focus { border-color: var(--accent); outline: none; }
+.profile-form input:focus,
+.modal select:focus { border-color: var(--accent); outline: none; }
 
 .date-input-row {
   display: grid;

@@ -1,6 +1,13 @@
 services:
   daysuntil:
     build: .
+    environment:
+      - DB_PATH=/data/daysuntil.db
+      - BASE_URL=${BASE_URL:-}
+      - GITHUB_CALLBACK_URL=${GITHUB_CALLBACK_URL:-}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
     ports:
       - "8888:8080"
     volumes:

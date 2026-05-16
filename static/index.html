@@ -4,11 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Days Until</title>
-  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
-  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
-  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png" />
-  <link rel="manifest" href="site.webmanifest" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+  <link rel="manifest" href="/site.webmanifest" />
+  <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <header>
@@ -57,6 +57,27 @@
   </section>
 
   <main id="app-view" class="hidden">
+    <section id="profile-panel" class="profile-panel hidden">
+      <div>
+        <p class="profile-kicker">Public profile</p>
+        <p id="profile-link" class="profile-link"></p>
+      </div>
+      <form id="profile-form" class="profile-form" novalidate>
+        <label for="profile-display-name">Display name</label>
+        <div class="profile-form-row">
+          <input type="text" id="profile-display-name" maxlength="80" required />
+          <button id="profile-save" type="submit" class="btn-secondary">Save</button>
+        </div>
+        <p id="profile-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
+      </form>
+    </section>
+
+    <section id="public-profile-header" class="public-profile-header hidden">
+      <p class="profile-kicker">Public profile</p>
+      <h2 id="public-profile-name"></h2>
+      <p id="public-profile-username" class="public-profile-username"></p>
+    </section>
+
     <section id="interval-list">
       <p id="loading-msg" class="empty-msg">Loading intervals...</p>
     </section>
@@ -101,6 +122,12 @@
           </span>
         </div>
 
+        <label for="field-visibility">Visibility</label>
+        <select id="field-visibility">
+          <option value="private">Private</option>
+          <option value="public">Public</option>
+        </select>
+
         <p id="form-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
 
         <div id="date-picker" class="date-picker hidden" role="dialog" aria-modal="false" aria-label="Choose date">
@@ -129,6 +156,6 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="/app.js"></script>
 </body>
 </html>

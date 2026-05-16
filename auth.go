@@ -30,8 +30,9 @@ type contextKey string
 const userContextKey contextKey = "authenticated-user"
 
 type User struct {
-	ID       int64  `json:"id"`
-	Username string `json:"username"`
+	ID          int64  `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
 }
 
 type userCredentials struct {
@@ -68,6 +69,7 @@ func initAuthDB(db *sql.DB) error {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS users (
 		id                    INTEGER PRIMARY KEY AUTOINCREMENT,
 		username              TEXT NOT NULL UNIQUE,
+		display_name          TEXT NOT NULL DEFAULT '',
 		password_hash         TEXT NOT NULL,
 		auth_provider         TEXT NOT NULL DEFAULT '',
 		auth_provider_user_id TEXT NOT NULL DEFAULT '',
@@ -77,6 +79,9 @@ func initAuthDB(db *sql.DB) error {
 		return err
 	}
 
+	if err := ensureUserColumn(db, "display_name", "ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := ensureUserColumn(db, "auth_provider", "ALTER TABLE users ADD COLUMN auth_provider TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
@@ -170,8 +175,8 @@ func createUser(db *sql.DB, creds userCredentials) (User, error) {
 	}
 
 	res, err := tx.Exec(
-		`INSERT INTO users (username, password_hash, auth_provider, auth_provider_user_id, created_at) VALUES (?, ?, '', '', ?)`,
-		username, string(passwordHash), time.Now().UTC().Format(time.RFC3339),
+		`INSERT INTO users (username, display_name, password_hash, auth_provider, auth_provider_user_id, created_at) VALUES (?, ?, ?, '', '', ?)`,
+		username, username, string(passwordHash), time.Now().UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
@@ -196,7 +201,7 @@ func createUser(db *sql.DB, creds userCredentials) (User, error) {
 		return User{}, err
 	}
 
-	return User{ID: userID, Username: username}, nil
+	return User{ID: userID, Username: username, DisplayName: username}, nil
 }
 
 func authenticateUser(db *sql.DB, creds userCredentials) (User, error) {
@@ -208,9 +213,9 @@ func authenticateUser(db *sql.DB, creds userCredentials) (User, error) {
 	var user User
 	var passwordHash string
 	err := db.QueryRow(
-		`SELECT id, username, password_hash FROM users WHERE username=?`,
+		`SELECT id, username, display_name, password_hash FROM users WHERE username=?`,
 		username,
-	).Scan(&user.ID, &user.Username, &passwordHash)
+	).Scan(&user.ID, &user.Username, &user.DisplayName, &passwordHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, fmt.Errorf("invalid username or password")
@@ -258,9 +263,9 @@ func (c githubOAuthConfig) Enabled() bool {
 func findUserByProvider(db *sql.DB, provider, providerUserID string) (User, error) {
 	var user User
 	err := db.QueryRow(
-		`SELECT id, username FROM users WHERE auth_provider=? AND auth_provider_user_id=?`,
+		`SELECT id, username, display_name FROM users WHERE auth_provider=? AND auth_provider_user_id=?`,
 		provider, providerUserID,
-	).Scan(&user.ID, &user.Username)
+	).Scan(&user.ID, &user.Username, &user.DisplayName)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
@@ -296,8 +301,8 @@ func findOrCreateOAuthUser(db *sql.DB, provider, providerUserID, providerLogin s
 	username := baseUsername
 	for attempt := 2; ; attempt += 1 {
 		res, err := tx.Exec(
-			`INSERT INTO users (username, password_hash, auth_provider, auth_provider_user_id, created_at) VALUES (?, '', ?, ?, ?)`,
-			username, provider, providerUserID, now,
+			`INSERT INTO users (username, display_name, password_hash, auth_provider, auth_provider_user_id, created_at) VALUES (?, ?, '', ?, ?, ?)`,
+			username, providerLogin, provider, providerUserID, now,
 		)
 		if err == nil {
 			userID, lastErr := res.LastInsertId()
@@ -316,7 +321,11 @@ func findOrCreateOAuthUser(db *sql.DB, provider, providerUserID, providerLogin s
 				return User{}, lastErr
 			}
 
-			return User{ID: userID, Username: username}, nil
+			displayName := providerLogin
+			if strings.TrimSpace(displayName) == "" {
+				displayName = username
+			}
+			return User{ID: userID, Username: username, DisplayName: displayName}, nil
 		}
 
 		errText := strings.ToLower(err.Error())
@@ -403,12 +412,12 @@ func findUserBySession(db *sql.DB, rawToken string) (User, error) {
 	var expiresAt string
 
 	err := db.QueryRow(
-		`SELECT u.id, u.username, s.expires_at
+		`SELECT u.id, u.username, u.display_name, s.expires_at
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.id=?`,
 		hashToken(rawToken),
-	).Scan(&user.ID, &user.Username, &expiresAt)
+	).Scan(&user.ID, &user.Username, &user.DisplayName, &expiresAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound

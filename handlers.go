@@ -14,6 +14,10 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+type profileUpdate struct {
+	DisplayName string `json:"display_name"`
+}
+
 type handler struct {
 	db           *sql.DB
 	cookieSecure bool
@@ -181,8 +185,55 @@ func (h *handler) currentUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, user)
 }
 
+func (h *handler) updateProfile(w http.ResponseWriter, r *http.Request) {
+	user, err := authenticatedUser(h.db, r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var update profileUpdate
+	if err := decodeJSONBody(w, r, &update); err != nil {
+		return
+	}
+
+	displayName, err := validateDisplayName(update.DisplayName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	updatedUser, err := updateDisplayName(h.db, user.ID, displayName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, updatedUser)
+}
+
 func (h *handler) authProviders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, authProviders(h.githubOAuth))
+}
+
+func (h *handler) publicProfile(w http.ResponseWriter, r *http.Request) {
+	username := strings.ToLower(strings.TrimSpace(chi.URLParam(r, "username")))
+	if username == "" {
+		http.Error(w, "username is required", http.StatusBadRequest)
+		return
+	}
+
+	profile, err := publicProfileByUsername(h.db, username)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+	writeJSON(w, profile)
 }
 
 func (h *handler) githubOAuthStart(w http.ResponseWriter, r *http.Request) {
@@ -266,7 +317,24 @@ func validateInterval(iv Interval) error {
 	if !end.After(start) {
 		return fmt.Errorf("end_date must be after start_date")
 	}
+	if iv.Visibility == "" {
+		iv.Visibility = "private"
+	}
+	if iv.Visibility != "private" && iv.Visibility != "public" {
+		return fmt.Errorf("visibility must be private or public")
+	}
 	return nil
+}
+
+func validateDisplayName(displayName string) (string, error) {
+	displayName = strings.TrimSpace(displayName)
+	if displayName == "" {
+		return "", fmt.Errorf("display_name is required")
+	}
+	if len(displayName) > 80 {
+		return "", fmt.Errorf("display_name must be at most 80 characters")
+	}
+	return displayName, nil
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -291,4 +359,9 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
 	}
 
 	return nil
+}
+
+func servePublicProfileApp(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+	http.ServeFile(w, r, "static/index.html")
 }

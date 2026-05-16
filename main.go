@@ -53,9 +53,12 @@ func newRouter(h *handler) http.Handler {
 	r.Post("/api/login", h.login)
 	r.Post("/api/logout", h.logout)
 	r.Get("/api/me", h.currentUser)
+	r.Put("/api/me/profile", h.updateProfile)
 	r.Get("/api/auth/providers", h.authProviders)
+	r.Get("/api/public/users/{username}", h.publicProfile)
 	r.Get("/api/oauth/github/start", h.githubOAuthStart)
 	r.Get("/api/oauth/github/callback", h.githubOAuthCallback)
+	r.Get("/u/{username}", servePublicProfileApp)
 
 	r.Route("/api/intervals", func(r chi.Router) {
 		r.Use(authMiddleware(h))
