@@ -46,6 +46,11 @@ header h1 {
   text-align: center;
 }
 
+.header-meta {
+  grid-column: 1;
+  justify-self: start;
+}
+
 .title-link {
   color: inherit;
   text-decoration: none;
