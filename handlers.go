@@ -373,10 +373,3 @@ func servePublicProfileApp(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 	http.ServeFile(w, r, "static/index.html")
 }
-
-func currentVersion() string {
-	if strings.TrimSpace(version) == "" {
-		return "dev"
-	}
-	return version
-}

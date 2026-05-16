@@ -169,8 +169,8 @@ func TestVersionEndpoint(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode version: %v", err)
 	}
-	if payload.Version != "dev" {
-		t.Fatalf("expected default version dev, got %q", payload.Version)
+	if payload.Version != currentVersion() {
+		t.Fatalf("expected version %q, got %q", currentVersion(), payload.Version)
 	}
 }
 
