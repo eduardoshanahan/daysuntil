@@ -75,6 +75,16 @@ header #btn-add {
   border-radius: 999px;
 }
 
+.app-version {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
 #app-view {
   width: 100%;
 }

@@ -39,6 +39,7 @@ const appStatus = document.getElementById('app-status');
 const statusMessage = document.getElementById('status-message');
 const colorSwatches = document.getElementById('color-swatches');
 const userBadge = document.getElementById('user-badge');
+const appVersion = document.getElementById('app-version');
 const datePicker = document.getElementById('date-picker');
 const datePickerTitle = document.getElementById('date-picker-title');
 const datePickerGrid = document.getElementById('date-picker-grid');
@@ -97,6 +98,7 @@ async function apiFetch(path, options = {}) {
 }
 
 const api = {
+  version: () => apiFetch('/api/version'),
   providers: () => apiFetch('/api/auth/providers'),
   me: () => apiFetch('/api/me'),
   updateProfile: data => apiFetch('/api/me/profile', { method: 'PUT', body: JSON.stringify(data) }),
@@ -263,6 +265,10 @@ function renderIntervals(intervals, options = {}) {
     return;
   }
   intervals.forEach(iv => list.appendChild(renderCard(iv, options)));
+}
+
+function setVersionLabel(label) {
+  appVersion.textContent = label || 'dev';
 }
 
 async function loadIntervals(options = {}) {
@@ -694,6 +700,13 @@ async function initPrivateApp() {
   const authErrorMessage = params.get('auth_error');
 
   try {
+    const build = await api.version();
+    setVersionLabel(build.version);
+  } catch {
+    setVersionLabel('dev');
+  }
+
+  try {
     const providers = await api.providers();
     authOAuth.classList.toggle('hidden', !providers.github_enabled);
   } catch {
@@ -725,6 +738,9 @@ function initPublicView() {
   profilePanel.classList.add('hidden');
   publicProfileHeader.classList.remove('hidden');
   appView.classList.remove('hidden');
+  api.version()
+    .then(build => setVersionLabel(build.version))
+    .catch(() => setVersionLabel('dev'));
   loadPublicProfile();
 }
 

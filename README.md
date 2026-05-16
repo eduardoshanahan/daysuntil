@@ -150,3 +150,41 @@ nix develop -c sqlite3 daysuntil.db
 - **Backend**: Go with [chi](https://github.com/go-chi/chi) router
 - **Database**: SQLite via [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) (pure Go, no CGo)
 - **Frontend**: Vanilla HTML, CSS, and JavaScript — no framework
+
+## Versioning
+
+This project uses Semantic Versioning.
+
+Release source of truth:
+
+- Git tags like `v0.1.0`, `v0.2.0`, `v1.0.0`
+
+Current release workflow:
+
+- pushes to `main` publish container images tagged with:
+  - `latest`
+  - commit SHA
+- pushes of semantic version tags publish container images tagged with:
+  - the exact version tag, for example `v0.3.0`
+- the running app shows that build version in the UI header and exposes it at:
+  - `/api/version`
+
+Examples:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Local `go run .` builds show:
+
+```text
+dev
+```
+
+Container and CI builds stamp the binary with:
+
+- `${CI_COMMIT_SHA}` for `main`
+- `${CI_COMMIT_TAG}` for tagged releases
+
+Document release notes in [CHANGELOG.md](/home/eduardo/Programming/programs/daysuntil/CHANGELOG.md).

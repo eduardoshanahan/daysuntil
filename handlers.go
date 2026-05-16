@@ -18,11 +18,19 @@ type profileUpdate struct {
 	DisplayName string `json:"display_name"`
 }
 
+type versionResponse struct {
+	Version string `json:"version"`
+}
+
 type handler struct {
 	db           *sql.DB
 	cookieSecure bool
 	githubOAuth  githubOAuthConfig
 	httpClient   *http.Client
+}
+
+func (h *handler) appVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, versionResponse{Version: currentVersion()})
 }
 
 func (h *handler) listIntervals(w http.ResponseWriter, r *http.Request) {
@@ -364,4 +372,11 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
 func servePublicProfileApp(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 	http.ServeFile(w, r, "static/index.html")
+}
+
+func currentVersion() string {
+	if strings.TrimSpace(version) == "" {
+		return "dev"
+	}
+	return version
 }

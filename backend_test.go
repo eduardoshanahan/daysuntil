@@ -157,6 +157,23 @@ func TestIntervalsRequireAuthentication(t *testing.T) {
 	}
 }
 
+func TestVersionEndpoint(t *testing.T) {
+	_, router := newTestServer(t)
+
+	rec := performRequest(t, router, http.MethodGet, "/api/version", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 loading version, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	var payload versionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode version: %v", err)
+	}
+	if payload.Version != "dev" {
+		t.Fatalf("expected default version dev, got %q", payload.Version)
+	}
+}
+
 func TestLoginAndCurrentUser(t *testing.T) {
 	_, router := newTestServer(t)
 

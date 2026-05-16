@@ -49,6 +49,7 @@ func newRouter(h *handler) http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
+	r.Get("/api/version", h.appVersion)
 	r.Post("/api/register", h.register)
 	r.Post("/api/login", h.login)
 	r.Post("/api/logout", h.logout)
