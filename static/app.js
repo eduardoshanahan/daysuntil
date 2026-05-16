@@ -11,6 +11,8 @@ const fieldName = document.getElementById('field-name');
 const fieldStart = document.getElementById('field-start');
 const fieldEnd = document.getElementById('field-end');
 const fieldColor = document.getElementById('field-color');
+const btnPickStart = document.getElementById('btn-pick-start');
+const btnPickEnd = document.getElementById('btn-pick-end');
 const formError = document.getElementById('form-error');
 const btnSave = document.getElementById('btn-save');
 const btnAdd = document.getElementById('btn-add');
@@ -22,6 +24,11 @@ const appStatus = document.getElementById('app-status');
 const statusMessage = document.getElementById('status-message');
 const colorSwatches = document.getElementById('color-swatches');
 const userBadge = document.getElementById('user-badge');
+const datePicker = document.getElementById('date-picker');
+const datePickerTitle = document.getElementById('date-picker-title');
+const datePickerGrid = document.getElementById('date-picker-grid');
+const datePrev = document.getElementById('date-prev');
+const dateNext = document.getElementById('date-next');
 
 const authForm = document.getElementById('auth-form');
 const authUsername = document.getElementById('auth-username');
@@ -41,6 +48,8 @@ let activeLoadToken = 0;
 const pendingDeleteIds = new Set();
 let lastFocusedElement = null;
 let currentUser = null;
+let activeDateField = null;
+let visibleMonth = null;
 
 class ApiError extends Error {
   constructor(message, status) {
@@ -90,6 +99,19 @@ function parseDate(str) {
   return new Date(y, m - 1, d);
 }
 
+function isValidISODate(str) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return false;
+  const date = parseDate(str);
+  return formatISODate(date) === str;
+}
+
+function formatISODate(date) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function diffDays(a, b) {
   return Math.round((b - a) / 86400000);
 }
@@ -97,6 +119,10 @@ function diffDays(a, b) {
 function formatDate(str) {
   const [y, m, d] = str.split('-');
   return `${d}/${m}/${y}`;
+}
+
+function monthLabel(date) {
+  return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 }
 
 function computeProgress(iv) {
@@ -255,6 +281,7 @@ function openEdit(iv) {
 
 function closeModal(force = false) {
   if (isSubmitting && !force) return;
+  hideDatePicker();
   overlay.classList.add('hidden');
   document.body.classList.remove('modal-open');
   if (lastFocusedElement instanceof HTMLElement) {
@@ -270,6 +297,64 @@ function showError(message) {
 function hideError() {
   formError.textContent = '';
   formError.classList.add('hidden');
+}
+
+function openDatePicker(field) {
+  activeDateField = field;
+  const currentValue = field.value;
+  const baseDate = isValidISODate(currentValue) ? parseDate(currentValue) : today();
+  visibleMonth = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
+  renderDatePicker();
+  datePicker.classList.remove('hidden');
+}
+
+function hideDatePicker() {
+  datePicker.classList.add('hidden');
+  activeDateField = null;
+}
+
+function renderDatePicker() {
+  if (!visibleMonth) return;
+
+  datePickerTitle.textContent = monthLabel(visibleMonth);
+  datePickerGrid.innerHTML = '';
+
+  const year = visibleMonth.getFullYear();
+  const month = visibleMonth.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const startOffset = (firstDay.getDay() + 6) % 7;
+  const gridStart = new Date(year, month, 1 - startOffset);
+  const selectedValue = activeDateField && isValidISODate(activeDateField.value) ? activeDateField.value : '';
+  const todayValue = formatISODate(today());
+
+  for (let index = 0; index < 42; index += 1) {
+    const date = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + index);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'date-day';
+    button.textContent = `${date.getDate()}`;
+    button.dataset.value = formatISODate(date);
+
+    if (date.getMonth() !== month) {
+      button.classList.add('muted');
+    }
+    if (button.dataset.value === todayValue) {
+      button.classList.add('today');
+    }
+    if (button.dataset.value === selectedValue) {
+      button.classList.add('selected');
+    }
+
+    button.addEventListener('click', () => {
+      if (!activeDateField) return;
+      activeDateField.value = button.dataset.value;
+      hideError();
+      hideDatePicker();
+      activeDateField.focus();
+    });
+
+    datePickerGrid.appendChild(button);
+  }
 }
 
 function showAuthError(message) {
@@ -410,6 +495,35 @@ overlay.addEventListener('click', event => {
   if (event.target === overlay) closeModal();
 });
 
+datePrev.addEventListener('click', () => {
+  if (!visibleMonth) return;
+  visibleMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() - 1, 1);
+  renderDatePicker();
+});
+
+dateNext.addEventListener('click', () => {
+  if (!visibleMonth) return;
+  visibleMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1);
+  renderDatePicker();
+});
+
+btnPickStart.addEventListener('click', () => openDatePicker(fieldStart));
+btnPickEnd.addEventListener('click', () => openDatePicker(fieldEnd));
+fieldStart.addEventListener('focus', () => openDatePicker(fieldStart));
+fieldEnd.addEventListener('focus', () => openDatePicker(fieldEnd));
+
+document.addEventListener('click', event => {
+  if (datePicker.classList.contains('hidden')) return;
+  const clickedInsidePicker = datePicker.contains(event.target);
+  const clickedTrigger = event.target === fieldStart
+    || event.target === fieldEnd
+    || event.target === btnPickStart
+    || event.target === btnPickEnd;
+  if (!clickedInsidePicker && !clickedTrigger) {
+    hideDatePicker();
+  }
+});
+
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeModal();
   if (event.key === 'Tab' && !overlay.classList.contains('hidden')) trapModalFocus(event);
@@ -470,9 +584,17 @@ form.addEventListener('submit', async event => {
     showError('End date is required.');
     return;
   }
+  if (!isValidISODate(start)) {
+    showError('Start date must be in YYYY-MM-DD format.');
+    return;
+  }
+  if (!isValidISODate(end)) {
+    showError('End date must be in YYYY-MM-DD format.');
+    return;
+  }
   if (start >= end) {
     showError('End date must be after start date.');
-    return;
+      return;
   }
 
   const data = { name, start_date: start, end_date: end, color: fieldColor.value };

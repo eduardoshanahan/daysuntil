@@ -68,10 +68,16 @@
         <input type="text" id="field-name" placeholder="e.g. Summer vacation" required />
 
         <label for="field-start">Start date</label>
-        <input type="date" id="field-start" required />
+        <div class="date-input-row">
+          <input type="text" id="field-start" placeholder="YYYY-MM-DD" inputmode="numeric" autocomplete="off" required />
+          <button type="button" id="btn-pick-start" class="btn-icon date-picker-trigger" aria-label="Pick start date">Pick</button>
+        </div>
 
         <label for="field-end">End date</label>
-        <input type="date" id="field-end" required />
+        <div class="date-input-row">
+          <input type="text" id="field-end" placeholder="YYYY-MM-DD" inputmode="numeric" autocomplete="off" required />
+          <button type="button" id="btn-pick-end" class="btn-icon date-picker-trigger" aria-label="Pick end date">Pick</button>
+        </div>
 
         <label for="field-color">Color</label>
         <div class="color-row">
@@ -87,6 +93,24 @@
         </div>
 
         <p id="form-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
+
+        <div id="date-picker" class="date-picker hidden" role="dialog" aria-modal="false" aria-label="Choose date">
+          <div class="date-picker-header">
+            <button type="button" id="date-prev" class="btn-icon" aria-label="Previous month">&lt;</button>
+            <p id="date-picker-title" class="date-picker-title"></p>
+            <button type="button" id="date-next" class="btn-icon" aria-label="Next month">&gt;</button>
+          </div>
+          <div class="date-picker-weekdays" aria-hidden="true">
+            <span>Mo</span>
+            <span>Tu</span>
+            <span>We</span>
+            <span>Th</span>
+            <span>Fr</span>
+            <span>Sa</span>
+            <span>Su</span>
+          </div>
+          <div id="date-picker-grid" class="date-picker-grid"></div>
+        </div>
 
         <div class="modal-actions">
           <button type="button" id="btn-cancel" class="btn-secondary">Cancel</button>
