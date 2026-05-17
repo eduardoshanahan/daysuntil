@@ -5,6 +5,7 @@ A small homelab web application to track named time intervals. For each interval
 ## Features
 
 - Local email/password accounts with separate public usernames
+- Human-readable public sharing links generated from a word-based slug
 - Optional GitHub OAuth alongside local login
 - Basic in-memory rate limiting on login and registration endpoints
 - Add, edit, and delete named intervals (start date → end date)
@@ -25,6 +26,14 @@ docker compose up --build -d
 The app will be available at `http://localhost:8888`.
 
 Data is stored in a named Docker volume (`daysuntil-data`) and survives container restarts.
+
+Public sharing uses routes like:
+
+```text
+/p/forest-harbor-otter
+```
+
+These links are generated per account and are separate from the login email and username.
 
 ### Docker Compose environment
 

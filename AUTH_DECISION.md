@@ -7,7 +7,8 @@ Date: 2026-05-17
 The application will move to this account model:
 
 - `email` is the login identifier for local accounts
-- `username` is a separate public identity used for profile URLs and sharing
+- `username` is a separate public identity used for in-app identity and display
+- `public_slug` is a separate human-readable public sharing identifier
 - users authenticate with `email + password`
 - OAuth accounts do not get a local password by default
 - auth error messages should be normalized so they do not reveal whether an email or account exists
@@ -25,6 +26,7 @@ Separating `email` from `username` improves the security model:
 
 - public usernames are no longer login names
 - shared profile URLs stop exposing the auth identifier
+- public sharing no longer depends on exposing the username
 - the system is better positioned for future password reset and account management flows
 
 ## OAuth rule
@@ -57,7 +59,7 @@ Planned changes:
 1. add `email` to the `users` schema
 2. update registration to collect `email`, `username`, and `password`
 3. update local login to use `email` and `password`
-4. keep `username` for `/u/{username}` and public profile lookup
+4. keep `username` as the in-app public identity, but use `public_slug` for public sharing routes
 5. keep OAuth accounts passwordless by default
 6. normalize auth failures to avoid email enumeration
 7. update tests and frontend copy

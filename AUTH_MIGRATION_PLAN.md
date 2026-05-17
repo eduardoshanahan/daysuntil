@@ -35,8 +35,8 @@ Move local authentication from `username + password` to `email + password`, whil
 
 ### 3. Public identity behavior
 
-- keep `/u/{username}` unchanged
-- keep public profile lookup by `username`
+- keep `username` as the in-app public identity
+- use a generated human-readable `public_slug` for public sharing routes
 - do not expose email in public or authenticated JSON responses
 
 ### 4. Frontend changes
@@ -81,6 +81,7 @@ Implemented:
 - kept OAuth accounts passwordless by default
 - normalized local login failures to `invalid email or password`
 - kept email out of current user and public profile JSON responses
+- switched public sharing from username routes to generated `public_slug` routes
 - updated frontend auth fields and copy to match the new model
 - added backend tests for migration, email login, generic failures, OAuth passwordless behavior, and email privacy
 

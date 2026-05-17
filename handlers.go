@@ -245,13 +245,13 @@ func (h *handler) authProviders(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) publicProfile(w http.ResponseWriter, r *http.Request) {
-	username := strings.ToLower(strings.TrimSpace(chi.URLParam(r, "username")))
-	if username == "" {
-		http.Error(w, "username is required", http.StatusBadRequest)
+	publicSlug := strings.ToLower(strings.TrimSpace(chi.URLParam(r, "publicSlug")))
+	if publicSlug == "" {
+		http.Error(w, "public slug is required", http.StatusBadRequest)
 		return
 	}
 
-	profile, err := publicProfileByUsername(h.db, username)
+	profile, err := publicProfileBySlug(h.db, publicSlug)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			http.Error(w, "not found", http.StatusNotFound)

@@ -1,9 +1,9 @@
 'use strict';
 
 const routePath = window.location.pathname;
-const publicMatch = routePath.match(/^\/u\/([^/]+)$/);
-const publicUsername = publicMatch ? decodeURIComponent(publicMatch[1]).toLowerCase() : '';
-const isPublicView = publicUsername !== '';
+const publicMatch = routePath.match(/^\/p\/([^/]+)$/);
+const publicSlug = publicMatch ? decodeURIComponent(publicMatch[1]).toLowerCase() : '';
+const isPublicView = publicSlug !== '';
 
 const authView = document.getElementById('auth-view');
 const appView = document.getElementById('app-view');
@@ -113,7 +113,7 @@ const api = {
   create: data => apiFetch('/api/intervals', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => apiFetch(`/api/intervals/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: id => apiFetch(`/api/intervals/${id}`, { method: 'DELETE' }),
-  publicProfile: username => apiFetch(`/api/public/users/${encodeURIComponent(username)}`),
+  publicProfile: slug => apiFetch(`/api/public/profiles/${encodeURIComponent(slug)}`),
 };
 
 function today() {
@@ -249,7 +249,7 @@ function setCurrentUser(user) {
   if (isAuthenticated) {
     userBadge.textContent = user.display_name || user.username;
     profileDisplayName.value = user.display_name || user.username;
-    profileLink.href = `${window.location.origin}/u/${user.username}`;
+    profileLink.href = `${window.location.origin}/p/${user.public_slug}`;
     profileLink.textContent = profileLink.href;
     authEmail.value = '';
     authUsername.value = '';
@@ -311,7 +311,7 @@ async function loadIntervals(options = {}) {
 async function loadPublicProfile() {
   list.innerHTML = '<p class="empty-msg">Loading public profile...</p>';
   try {
-    const profile = await api.publicProfile(publicUsername);
+    const profile = await api.publicProfile(publicSlug);
     document.title = `${profile.display_name || profile.username} | Days Until`;
     publicProfileName.textContent = profile.display_name || profile.username;
     publicProfileUsername.textContent = `@${profile.username}`;

@@ -68,12 +68,14 @@ Status: Fixed
 What changed:
 
 - public profile lookup now returns `404` unless the user has at least one public interval
-- this removes the side channel where a username could be confirmed even when the account had nothing public to show
+- public sharing now uses a generated `public_slug` instead of exposing the username in the route
+- this removes the side channel where an account could be confirmed even when it had nothing public to show
 
 Files:
 
 - `models.go`
 - `handlers.go`
+- `public_slug.go`
 
 ### 5. Private email exposure
 
@@ -136,13 +138,13 @@ Relevant files:
 
 Problem:
 
-- public intervals are intentionally exposed through `/u/{username}` and `/api/public/users/{username}`
-- once a user marks an interval public, anyone who knows the username can fetch that public data
+- public intervals are intentionally exposed through `/p/{public_slug}` and `/api/public/profiles/{public_slug}`
+- once a user marks an interval public, anyone who knows the public slug can fetch that public data
 
 Impact:
 
 - privacy still depends on correct user understanding of public visibility
-- public sharing remains guessable by username, even though basic no-content enumeration was reduced
+- public sharing remains guessable if a public slug is disclosed, even though it is better protected than a username-based route
 
 Suggested fix direction:
 

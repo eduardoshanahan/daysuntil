@@ -175,6 +175,9 @@ func TestRegisterAdoptsLegacyIntervalsForFirstUser(t *testing.T) {
 	if user.DisplayName != "alice" {
 		t.Fatalf("expected default display name alice, got %q", user.DisplayName)
 	}
+	if user.PublicSlug == "" {
+		t.Fatal("expected public slug to be generated")
+	}
 
 	rec := performRequest(t, router, http.MethodGet, "/api/intervals", "", cookie)
 	if rec.Code != http.StatusOK {
@@ -234,6 +237,9 @@ func TestLoginAndCurrentUser(t *testing.T) {
 	user := decodeUser(t, me)
 	if user.Username != "alice" {
 		t.Fatalf("expected current user alice, got %q", user.Username)
+	}
+	if user.PublicSlug == "" {
+		t.Fatal("expected current user response to include public slug")
 	}
 }
 
@@ -335,7 +341,7 @@ func TestUpdateDisplayName(t *testing.T) {
 func TestPublicProfileOnlyShowsPublicIntervals(t *testing.T) {
 	_, router := newTestServer(t)
 
-	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	cookie, user := registerUser(t, router, "alice@example.com", "alice", "password123")
 
 	updateProfile := performRequest(t, router, http.MethodPut, "/api/me/profile", `{"display_name":"Alice Public"}`, cookie)
 	if updateProfile.Code != http.StatusOK {
@@ -364,7 +370,7 @@ func TestPublicProfileOnlyShowsPublicIntervals(t *testing.T) {
 		t.Fatalf("expected 201 creating public interval, got %d", publicInterval.Code)
 	}
 
-	rec := performRequest(t, router, http.MethodGet, "/api/public/users/alice", "")
+	rec := performRequest(t, router, http.MethodGet, "/api/public/profiles/"+user.PublicSlug, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 loading public profile, got %d (%s)", rec.Code, rec.Body.String())
 	}
@@ -385,7 +391,7 @@ func TestPublicProfileOnlyShowsPublicIntervals(t *testing.T) {
 func TestPublicProfileReturnsNotFoundWhenUserHasNoPublicIntervals(t *testing.T) {
 	_, router := newTestServer(t)
 
-	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	cookie, user := registerUser(t, router, "alice@example.com", "alice", "password123")
 
 	privateInterval := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 		"name":"Private Trip",
@@ -398,7 +404,7 @@ func TestPublicProfileReturnsNotFoundWhenUserHasNoPublicIntervals(t *testing.T) 
 		t.Fatalf("expected 201 creating private interval, got %d (%s)", privateInterval.Code, privateInterval.Body.String())
 	}
 
-	rec := performRequest(t, router, http.MethodGet, "/api/public/users/alice", "")
+	rec := performRequest(t, router, http.MethodGet, "/api/public/profiles/"+user.PublicSlug, "")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 when user has no public intervals, got %d (%s)", rec.Code, rec.Body.String())
 	}
@@ -530,12 +536,15 @@ func TestCurrentUserResponseDoesNotExposeEmail(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "\"email\"") {
 		t.Fatalf("expected email field to stay private, got %q", rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), "\"public_slug\"") {
+		t.Fatalf("expected public slug in current user response, got %q", rec.Body.String())
+	}
 }
 
 func TestDeleteAccountRemovesUserIntervalsAndSession(t *testing.T) {
 	db, router := newTestServer(t)
 
-	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	cookie, user := registerUser(t, router, "alice@example.com", "alice", "password123")
 
 	create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 		"name":"Trip",
@@ -558,7 +567,7 @@ func TestDeleteAccountRemovesUserIntervalsAndSession(t *testing.T) {
 		t.Fatalf("expected 401 after account deletion, got %d (%s)", me.Code, me.Body.String())
 	}
 
-	publicProfile := performRequest(t, router, http.MethodGet, "/api/public/users/alice", "")
+	publicProfile := performRequest(t, router, http.MethodGet, "/api/public/profiles/"+user.PublicSlug, "")
 	if publicProfile.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for deleted public profile, got %d (%s)", publicProfile.Code, publicProfile.Body.String())
 	}

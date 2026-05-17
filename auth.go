@@ -34,6 +34,7 @@ type User struct {
 	ID          int64  `json:"id"`
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
+	PublicSlug  string `json:"public_slug"`
 }
 
 type registerCredentials struct {
@@ -77,6 +78,7 @@ func initAuthDB(db *sql.DB) error {
 		id                    INTEGER PRIMARY KEY AUTOINCREMENT,
 		email                 TEXT NOT NULL DEFAULT '',
 		username              TEXT NOT NULL UNIQUE,
+		public_slug           TEXT NOT NULL DEFAULT '',
 		display_name          TEXT NOT NULL DEFAULT '',
 		password_hash         TEXT NOT NULL,
 		auth_provider         TEXT NOT NULL DEFAULT '',
@@ -93,6 +95,9 @@ func initAuthDB(db *sql.DB) error {
 	if err := ensureUserColumn(db, "email", "ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := ensureUserColumn(db, "public_slug", "ALTER TABLE users ADD COLUMN public_slug TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := ensureUserColumn(db, "auth_provider", "ALTER TABLE users ADD COLUMN auth_provider TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
@@ -104,6 +109,10 @@ func initAuthDB(db *sql.DB) error {
 		return err
 	}
 	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email <> ''`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_slug ON users(public_slug) WHERE public_slug <> ''`)
 	if err != nil {
 		return err
 	}
@@ -229,7 +238,7 @@ func createUser(db *sql.DB, creds registerCredentials) (User, error) {
 	}
 
 	res, err := tx.Exec(
-		`INSERT INTO users (email, username, display_name, password_hash, auth_provider, auth_provider_user_id, created_at) VALUES (?, ?, ?, ?, '', '', ?)`,
+		`INSERT INTO users (email, username, public_slug, display_name, password_hash, auth_provider, auth_provider_user_id, created_at) VALUES (?, ?, '', ?, ?, '', '', ?)`,
 		email, username, username, string(passwordHash), time.Now().UTC().Format(time.RFC3339),
 	)
 	if err != nil {
@@ -255,7 +264,12 @@ func createUser(db *sql.DB, creds registerCredentials) (User, error) {
 		return User{}, err
 	}
 
-	return User{ID: userID, Username: username, DisplayName: username}, nil
+	publicSlug, err := ensurePublicSlug(db, userID, "")
+	if err != nil {
+		return User{}, err
+	}
+
+	return User{ID: userID, Username: username, DisplayName: username, PublicSlug: publicSlug}, nil
 }
 
 func authenticateUser(db *sql.DB, creds loginCredentials) (User, error) {
@@ -267,9 +281,9 @@ func authenticateUser(db *sql.DB, creds loginCredentials) (User, error) {
 	var user User
 	var passwordHash string
 	err := db.QueryRow(
-		`SELECT id, username, display_name, password_hash FROM users WHERE email=?`,
+		`SELECT id, username, public_slug, display_name, password_hash FROM users WHERE email=?`,
 		email,
-	).Scan(&user.ID, &user.Username, &user.DisplayName, &passwordHash)
+	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &passwordHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, fmt.Errorf("invalid email or password")
@@ -282,6 +296,11 @@ func authenticateUser(db *sql.DB, creds loginCredentials) (User, error) {
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(creds.Password)); err != nil {
 		return User{}, fmt.Errorf("invalid email or password")
+	}
+
+	user.PublicSlug, err = ensurePublicSlug(db, user.ID, user.PublicSlug)
+	if err != nil {
+		return User{}, err
 	}
 
 	return user, nil
@@ -349,9 +368,9 @@ func urlUsesHTTPS(rawURL string) bool {
 func findUserByProvider(db *sql.DB, provider, providerUserID string) (User, error) {
 	var user User
 	err := db.QueryRow(
-		`SELECT id, username, display_name FROM users WHERE auth_provider=? AND auth_provider_user_id=?`,
+		`SELECT id, username, public_slug, display_name FROM users WHERE auth_provider=? AND auth_provider_user_id=?`,
 		provider, providerUserID,
-	).Scan(&user.ID, &user.Username, &user.DisplayName)
+	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
@@ -387,7 +406,7 @@ func findOrCreateOAuthUser(db *sql.DB, provider, providerUserID, providerLogin s
 	username := baseUsername
 	for attempt := 2; ; attempt += 1 {
 		res, err := tx.Exec(
-			`INSERT INTO users (email, username, display_name, password_hash, auth_provider, auth_provider_user_id, created_at) VALUES ('', ?, ?, '', ?, ?, ?)`,
+			`INSERT INTO users (email, username, public_slug, display_name, password_hash, auth_provider, auth_provider_user_id, created_at) VALUES ('', ?, '', ?, '', ?, ?, ?)`,
 			username, providerLogin, provider, providerUserID, now,
 		)
 		if err == nil {
@@ -411,7 +430,11 @@ func findOrCreateOAuthUser(db *sql.DB, provider, providerUserID, providerLogin s
 			if strings.TrimSpace(displayName) == "" {
 				displayName = username
 			}
-			return User{ID: userID, Username: username, DisplayName: displayName}, nil
+			publicSlug, slugErr := ensurePublicSlug(db, userID, "")
+			if slugErr != nil {
+				return User{}, slugErr
+			}
+			return User{ID: userID, Username: username, DisplayName: displayName, PublicSlug: publicSlug}, nil
 		}
 
 		errText := strings.ToLower(err.Error())
@@ -498,12 +521,12 @@ func findUserBySession(db *sql.DB, rawToken string) (User, error) {
 	var expiresAt string
 
 	err := db.QueryRow(
-		`SELECT u.id, u.username, u.display_name, s.expires_at
+		`SELECT u.id, u.username, u.public_slug, u.display_name, s.expires_at
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.id=?`,
 		hashToken(rawToken),
-	).Scan(&user.ID, &user.Username, &user.DisplayName, &expiresAt)
+	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &expiresAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
@@ -518,6 +541,11 @@ func findUserBySession(db *sql.DB, rawToken string) (User, error) {
 	if !expiresTime.After(time.Now().UTC()) {
 		_ = deleteSession(db, rawToken)
 		return User{}, ErrNotFound
+	}
+
+	user.PublicSlug, err = ensurePublicSlug(db, user.ID, user.PublicSlug)
+	if err != nil {
+		return User{}, err
 	}
 
 	return user, nil

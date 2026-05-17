@@ -170,7 +170,7 @@ func updateDisplayName(db *sql.DB, userID int64, displayName string) (User, erro
 	}
 
 	var user User
-	err = db.QueryRow(`SELECT id, username, display_name FROM users WHERE id=?`, userID).Scan(&user.ID, &user.Username, &user.DisplayName)
+	err = db.QueryRow(`SELECT id, username, public_slug, display_name FROM users WHERE id=?`, userID).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName)
 	if err != nil {
 		return User{}, err
 	}
@@ -208,15 +208,15 @@ func deleteUserAccount(db *sql.DB, userID int64) error {
 	return tx.Commit()
 }
 
-func publicProfileByUsername(db *sql.DB, username string) (PublicProfile, error) {
+func publicProfileBySlug(db *sql.DB, publicSlug string) (PublicProfile, error) {
 	var profile PublicProfile
 	rows, err := db.Query(
 		`SELECT u.username, u.display_name, i.id, i.name, i.start_date, i.end_date, i.color, i.visibility
 		FROM intervals i
 		JOIN users u ON u.id = i.user_id
-		WHERE u.username=? AND i.visibility='public'
+		WHERE u.public_slug=? AND i.visibility='public'
 		ORDER BY i.start_date`,
-		username,
+		publicSlug,
 	)
 	if err != nil {
 		return PublicProfile{}, err
