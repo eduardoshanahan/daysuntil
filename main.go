@@ -5,18 +5,8 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	_ "modernc.org/sqlite"
-)
-
-const (
-	readHeaderTimeout = 5 * time.Second
-	readTimeout       = 15 * time.Second
-	writeTimeout      = 30 * time.Second
-	idleTimeout       = 60 * time.Second
 )
 
 func main() {
@@ -57,106 +47,4 @@ func main() {
 	}
 	log.Printf("listening on :%s", port)
 	log.Fatal(newHTTPServer(":"+port, r).ListenAndServe())
-}
-
-func newRouter(h *handler) http.Handler {
-	r := chi.NewRouter()
-	r.Use(pathOnlyLogger)
-	r.Use(middleware.Recoverer)
-	r.Use(securityHeadersMiddleware)
-
-	r.Route("/api", func(r chi.Router) {
-		r.Use(noStoreMiddleware)
-
-		r.Get("/version", h.appVersion)
-		r.With(authRateLimitMiddleware(h.authLimiter, authActionRegister)).Post("/register", h.register)
-		r.With(authRateLimitMiddleware(h.authLimiter, authActionLogin)).Post("/login", h.login)
-		r.Post("/logout", h.logout)
-		r.Get("/me", h.currentUser)
-		r.Delete("/me", h.deleteAccount)
-		r.Put("/me/profile", h.updateProfile)
-		r.Get("/auth/providers", h.authProviders)
-		r.Get("/public/groups/{groupSlug}", h.publicShareGroup)
-	})
-	r.Get("/api/oauth/github/start", h.githubOAuthStart)
-	r.Get("/api/oauth/github/callback", h.githubOAuthCallback)
-	r.Get("/g/{groupSlug}", servePublicGroupApp)
-
-	r.Route("/api/intervals", func(r chi.Router) {
-		r.Use(authMiddleware(h))
-		r.Get("/", h.listIntervals)
-		r.Post("/", h.createInterval)
-		r.Post("/{id}/move", h.moveInterval)
-		r.Put("/{id}", h.updateInterval)
-		r.Delete("/{id}", h.deleteInterval)
-	})
-
-	r.Route("/api/share-groups", func(r chi.Router) {
-		r.Use(authMiddleware(h))
-		r.Get("/", h.listShareGroups)
-		r.Post("/", h.createShareGroup)
-		r.Put("/{id}", h.updateShareGroup)
-		r.Delete("/{id}", h.deleteShareGroup)
-		r.Post("/{id}/rotate", h.rotateShareGroup)
-	})
-
-	r.Handle("/*", http.FileServer(http.Dir("static")))
-	return r
-}
-
-func newHTTPServer(addr string, handler http.Handler) *http.Server {
-	return &http.Server{
-		Addr:              addr,
-		Handler:           handler,
-		ReadHeaderTimeout: readHeaderTimeout,
-		ReadTimeout:       readTimeout,
-		WriteTimeout:      writeTimeout,
-		IdleTimeout:       idleTimeout,
-	}
-}
-
-func securityHeadersMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		next.ServeHTTP(w, r)
-	})
-}
-
-func noStoreMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Pragma", "no-cache")
-		next.ServeHTTP(w, r)
-	})
-}
-
-func pathOnlyLogger(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(recorder, r)
-
-		path := r.URL.EscapedPath()
-		if path == "" {
-			path = r.URL.Path
-		}
-		log.Printf("%s %s -> %d (%s)", r.Method, path, recorder.status, time.Since(start).Round(time.Millisecond))
-	})
-}
-
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
-}
-
-func (r *statusRecorder) WriteHeader(status int) {
-	r.status = status
-	r.ResponseWriter.WriteHeader(status)
-}
-
-func (r *statusRecorder) Unwrap() http.ResponseWriter {
-	return r.ResponseWriter
 }
