@@ -5,10 +5,18 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	_ "modernc.org/sqlite"
+)
+
+const (
+	readHeaderTimeout = 5 * time.Second
+	readTimeout       = 15 * time.Second
+	writeTimeout      = 30 * time.Second
+	idleTimeout       = 60 * time.Second
 )
 
 func main() {
@@ -48,7 +56,7 @@ func main() {
 		port = "8080"
 	}
 	log.Printf("listening on :%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, r))
+	log.Fatal(newHTTPServer(":"+port, r).ListenAndServe())
 }
 
 func newRouter(h *handler) http.Handler {
@@ -79,4 +87,15 @@ func newRouter(h *handler) http.Handler {
 
 	r.Handle("/*", http.FileServer(http.Dir("static")))
 	return r
+}
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}
 }

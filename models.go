@@ -210,16 +210,8 @@ func deleteUserAccount(db *sql.DB, userID int64) error {
 
 func publicProfileByUsername(db *sql.DB, username string) (PublicProfile, error) {
 	var profile PublicProfile
-	err := db.QueryRow(`SELECT username, display_name FROM users WHERE username=?`, username).Scan(&profile.Username, &profile.DisplayName)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return PublicProfile{}, ErrNotFound
-		}
-		return PublicProfile{}, err
-	}
-
 	rows, err := db.Query(
-		`SELECT i.id, i.name, i.start_date, i.end_date, i.color, i.visibility
+		`SELECT u.username, u.display_name, i.id, i.name, i.start_date, i.end_date, i.color, i.visibility
 		FROM intervals i
 		JOIN users u ON u.id = i.user_id
 		WHERE u.username=? AND i.visibility='public'
@@ -233,13 +225,20 @@ func publicProfileByUsername(db *sql.DB, username string) (PublicProfile, error)
 
 	for rows.Next() {
 		var iv Interval
-		if err := rows.Scan(&iv.ID, &iv.Name, &iv.StartDate, &iv.EndDate, &iv.Color, &iv.Visibility); err != nil {
+		if err := rows.Scan(&profile.Username, &profile.DisplayName, &iv.ID, &iv.Name, &iv.StartDate, &iv.EndDate, &iv.Color, &iv.Visibility); err != nil {
 			return PublicProfile{}, err
 		}
 		profile.Intervals = append(profile.Intervals, iv)
 	}
 
-	return profile, rows.Err()
+	if err := rows.Err(); err != nil {
+		return PublicProfile{}, err
+	}
+	if len(profile.Intervals) == 0 {
+		return PublicProfile{}, ErrNotFound
+	}
+
+	return profile, nil
 }
 
 // parseDate parses an ISO 8601 date string (YYYY-MM-DD).

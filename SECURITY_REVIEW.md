@@ -2,156 +2,130 @@
 
 Date: 2026-05-17
 
-This document records the current security risks identified in the `daysuntil` codebase during a code review. It is intended as a backlog for future hardening work.
+This document tracks the security review status of the `daysuntil` codebase after the hardening changes completed during this review cycle.
 
 ## Summary
 
 No obvious remote code execution, SQL injection, or stored XSS issue was found in this review pass.
 
-The main risks are:
+The main originally identified issues around cookie security, auth abuse, and basic user enumeration have been addressed.
 
-1. insecure session cookie deployment defaults
-2. missing login and registration abuse controls
-3. user enumeration through auth and public profile behavior
-4. missing HTTP server timeouts
-5. predictable public profile exposure once content is marked public
+The main remaining risk in the current code is:
 
-## Findings
+1. intentional exposure of public intervals when a user chooses public visibility
 
-### 1. Insecure cookie default in deployment
+## Fixed During This Review
 
-Severity: High
+### 1. Cookie security defaults
 
-Relevant files:
+Status: Fixed
+
+What changed:
+
+- secure cookies now auto-enable when `BASE_URL` or `GITHUB_CALLBACK_URL` uses `https://`
+- the app refuses to start if `COOKIE_SECURE=false` is combined with an HTTPS deployment signal
+- the checked-in Compose config no longer forces `COOKIE_SECURE=false`
+
+Files:
 
 - `main.go`
 - `auth.go`
 - `docker-compose.yml`
 
-Problem:
+### 2. Auth endpoint abuse controls
 
-- Session and OAuth state cookies only get the `Secure` flag when `COOKIE_SECURE=true`.
-- The checked-in Compose file defaults `COOKIE_SECURE` to `false`.
-- If the app is exposed over plain HTTP, or behind a proxy with incorrect TLS handling, session cookies can be intercepted.
+Status: Fixed
 
-Relevant code:
+What changed:
 
-- `main.go:32`
-- `auth.go:471`
-- `auth.go:497`
-- `docker-compose.yml:10`
+- `/api/login` and `/api/register` now use basic in-memory per-IP rate limiting
+- the app returns `429 Too Many Requests` with `Retry-After` when the limit is exceeded
 
-Impact:
-
-- Session hijacking
-- OAuth state cookie exposure
-- Higher risk from network attackers and proxy misconfiguration
-
-Suggested fix direction:
-
-- Make secure cookies the default for non-local use.
-- Fail closed when deployed with a public `BASE_URL` that is HTTPS but `COOKIE_SECURE` is false.
-- Clearly separate local development defaults from production defaults.
-
-### 2. No rate limiting or abuse controls on auth endpoints
-
-Severity: Medium
-
-Relevant files:
+Files:
 
 - `main.go`
+- `rate_limit.go`
+
+### 3. Login account-type enumeration
+
+Status: Fixed
+
+What changed:
+
+- local auth now uses `email + password`
+- login failures are normalized to `invalid email or password`
+- OAuth accounts remain passwordless by default and do not reveal their account type through login responses
+
+Files:
+
+- `auth.go`
 - `handlers.go`
-- `auth.go`
 
-Problem:
+### 4. Public profile existence enumeration for users with no public data
 
-- `/api/login` and `/api/register` are public and have no rate limiting, cooldown, or lockout.
-- Password verification runs directly on every request.
+Status: Fixed
 
-Relevant code:
+What changed:
 
-- `main.go:53`
-- `main.go:54`
-- `handlers.go:133`
-- `handlers.go:155`
-- `auth.go:207`
+- public profile lookup now returns `404` unless the user has at least one public interval
+- this removes the side channel where a username could be confirmed even when the account had nothing public to show
 
-Impact:
+Files:
 
-- Brute force attacks
-- Credential stuffing
-- Automated account creation and storage abuse
-- Avoidable resource consumption
+- `models.go`
+- `handlers.go`
 
-Suggested fix direction:
+### 5. Private email exposure
 
-- Add IP-based and possibly username-based rate limiting.
-- Add registration throttling.
-- Consider exponential backoff or temporary lockouts.
-- Log suspicious auth abuse patterns.
+Status: Fixed
 
-### 3. User enumeration through auth and public profile behavior
+What changed:
 
-Severity: Medium
+- email is now used as the private local login identifier
+- username remains the public identity
+- email is not exposed in current-user or public-profile JSON responses
 
-Relevant files:
+Files:
 
 - `auth.go`
+- `models.go`
+- `handlers.go`
+- `static/app.js`
+- `static/index.html`
+
+### 6. Self-service account deletion
+
+Status: Added as a safety/control improvement
+
+What changed:
+
+- authenticated users can now delete their own account
+- deletion removes the user row, sessions, and intervals
+
+Files:
+
+- `main.go`
 - `handlers.go`
 - `models.go`
+- `static/app.js`
+- `static/index.html`
 
-Problem:
+### 7. HTTP server timeouts
 
-- Login returns a distinct message for GitHub-only accounts: `"this account uses GitHub sign-in"`.
-- The public profile endpoint reveals whether a username exists, even if that user has no public intervals.
+Status: Fixed
 
-Relevant code:
+What changed:
 
-- `auth.go:226`
-- `handlers.go:226`
-- `models.go:180`
+- the app now uses an explicit `http.Server`
+- read, write, header, and idle timeouts are configured
 
-Impact:
-
-- Attackers can confirm valid usernames.
-- Confirmed usernames make credential attacks more effective.
-- User discovery may expose more information than intended.
-
-Suggested fix direction:
-
-- Normalize login failures so they do not reveal account type.
-- Decide whether profiles with zero public intervals should return `404`.
-- Review whether public display name exposure matches the intended privacy model.
-
-### 4. Missing HTTP server timeouts
-
-Severity: Medium
-
-Relevant files:
+Files:
 
 - `main.go`
 
-Problem:
+## Remaining Findings
 
-- The application uses `http.ListenAndServe` with default server settings.
-- No read, write, header, or idle timeouts are configured.
-
-Relevant code:
-
-- `main.go:43`
-- `main.go:44`
-
-Impact:
-
-- Higher exposure to slowloris-style and connection exhaustion attacks
-- Easier denial of service against a small self-hosted service
-
-Suggested fix direction:
-
-- Replace `http.ListenAndServe` with an explicit `http.Server`.
-- Set at least `ReadHeaderTimeout`, `ReadTimeout`, `WriteTimeout`, and `IdleTimeout`.
-
-### 5. Public profile exposure is easy to enumerate if usernames are known
+### 1. Public profile exposure is still intentional for public intervals
 
 Severity: Low to Medium
 
@@ -162,34 +136,30 @@ Relevant files:
 
 Problem:
 
-- Public intervals are intentionally exposed through `/u/{username}` and `/api/public/users/{username}`.
-- If usernames are guessed or enumerated, an attacker can fetch any intervals marked public.
-
-Relevant code:
-
-- `main.go:59`
-- `main.go:62`
-- `models.go:190`
+- public intervals are intentionally exposed through `/u/{username}` and `/api/public/users/{username}`
+- once a user marks an interval public, anyone who knows the username can fetch that public data
 
 Impact:
 
-- Privacy depends heavily on username secrecy and correct user understanding of visibility settings.
+- privacy still depends on correct user understanding of public visibility
+- public sharing remains guessable by username, even though basic no-content enumeration was reduced
 
 Suggested fix direction:
 
-- Keep this behavior if it matches product intent, but document it clearly.
-- Consider optional unguessable share links if stronger privacy is wanted later.
+- keep this behavior if it matches product intent, but document it clearly
+- consider optional unguessable share links if stronger privacy is wanted later
 
 ## Notes
 
-- The frontend appears to avoid obvious stored XSS in interval rendering by escaping interval names before inserting them into HTML.
-- SQL queries use parameterized placeholders for user-controlled values.
-- The local database file is ignored by git and is not currently tracked in the repository.
+- the frontend escapes interval names before injecting them into HTML
+- SQL queries use parameterized placeholders for user-controlled values
+- the local database file is ignored by git and is not tracked in the repository
 
 ## Verification
 
-The following command passed during review:
+The following checks passed during this review cycle:
 
 ```bash
 nix develop -c go test ./...
+nix develop -c node --check static/app.js
 ```

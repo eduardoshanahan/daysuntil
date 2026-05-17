@@ -382,6 +382,28 @@ func TestPublicProfileOnlyShowsPublicIntervals(t *testing.T) {
 	}
 }
 
+func TestPublicProfileReturnsNotFoundWhenUserHasNoPublicIntervals(t *testing.T) {
+	_, router := newTestServer(t)
+
+	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+
+	privateInterval := performRequest(t, router, http.MethodPost, "/api/intervals", `{
+		"name":"Private Trip",
+		"start_date":"2026-05-20",
+		"end_date":"2026-05-21",
+		"color":"#4f8ef7",
+		"visibility":"private"
+	}`, cookie)
+	if privateInterval.Code != http.StatusCreated {
+		t.Fatalf("expected 201 creating private interval, got %d (%s)", privateInterval.Code, privateInterval.Body.String())
+	}
+
+	rec := performRequest(t, router, http.MethodGet, "/api/public/users/alice", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when user has no public intervals, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
 func TestLoginRateLimitReturnsTooManyRequests(t *testing.T) {
 	limiter := newAuthRateLimiter()
 	limiter.now = func() time.Time {
