@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"log"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -26,5 +30,33 @@ func TestNewHTTPServerSetsTimeouts(t *testing.T) {
 	}
 	if server.IdleTimeout != idleTimeout {
 		t.Fatalf("expected IdleTimeout %v, got %v", idleTimeout, server.IdleTimeout)
+	}
+}
+
+func TestPathOnlyLoggerOmitsQueryString(t *testing.T) {
+	var buf bytes.Buffer
+	previousOutput := log.Writer()
+	previousFlags := log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(previousOutput)
+		log.SetFlags(previousFlags)
+	})
+
+	handler := pathOnlyLogger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusFound)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/oauth/github/callback?code=secret-code&state=secret-state", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	logLine := buf.String()
+	if !strings.Contains(logLine, "/api/oauth/github/callback") {
+		t.Fatalf("expected log line to contain path, got %q", logLine)
+	}
+	if strings.Contains(logLine, "secret-code") || strings.Contains(logLine, "secret-state") || strings.Contains(logLine, "?code=") {
+		t.Fatalf("expected query string to be omitted from log line, got %q", logLine)
 	}
 }

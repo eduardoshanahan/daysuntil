@@ -42,7 +42,7 @@ Remaining scope:
 - decide whether the current one-group-per-interval model is enough
 - decide whether public share links need stronger entropy or expiry later
 
-### 2. Logging review
+### 2. Logging discipline for future changes
 
 Priority: Medium
 
@@ -53,7 +53,8 @@ Why:
 
 Current status:
 
-- a project logging rule is now documented in `SECURITY_LOGGING.md`
+- a project logging rule is documented in `SECURITY_LOGGING.md`
+- request logs now avoid query strings, so OAuth callback parameters are no longer logged
 
 Remaining scope:
 
