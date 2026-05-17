@@ -1,76 +1,84 @@
-'use strict';
-
-const routePath = window.location.pathname;
-const publicMatch = routePath.match(/^\/g\/([^/]+)$/);
-const publicGroupSlug = publicMatch ? decodeURIComponent(publicMatch[1]).toLowerCase() : '';
-const isPublicView = publicGroupSlug !== '';
-
-const authView = document.getElementById('auth-view');
-const appView = document.getElementById('app-view');
-const intervalTools = document.getElementById('interval-tools');
-const intervalFilterBar = document.getElementById('interval-filter-bar');
-const list = document.getElementById('interval-list');
-const profilePanel = document.getElementById('profile-panel');
-const shareGroupsPanel = document.getElementById('share-groups-panel');
-const groupsBadge = document.getElementById('groups-badge');
-const profileForm = document.getElementById('profile-form');
-const profileDisplayName = document.getElementById('profile-display-name');
-const profileSave = document.getElementById('profile-save');
-const profileDeleteAccount = document.getElementById('profile-delete-account');
-const profileError = document.getElementById('profile-error');
-const accountSummary = document.getElementById('account-summary');
-const shareGroupForm = document.getElementById('share-group-form');
-const shareGroupName = document.getElementById('share-group-name');
-const shareGroupCreate = document.getElementById('share-group-create');
-const shareGroupError = document.getElementById('share-group-error');
-const shareGroupsList = document.getElementById('share-groups-list');
-const shareGroupsSummary = document.getElementById('share-groups-summary');
-const publicGroupHeader = document.getElementById('public-group-header');
-const publicGroupName = document.getElementById('public-group-name');
-const publicGroupOwner = document.getElementById('public-group-owner');
-const overlay = document.getElementById('modal-overlay');
-const form = document.getElementById('interval-form');
-const modalTitle = document.getElementById('modal-title');
-const fieldId = document.getElementById('field-id');
-const fieldName = document.getElementById('field-name');
-const fieldStart = document.getElementById('field-start');
-const fieldEnd = document.getElementById('field-end');
-const fieldColor = document.getElementById('field-color');
-const fieldShareGroup = document.getElementById('field-share-group');
-const btnPickStart = document.getElementById('btn-pick-start');
-const btnPickEnd = document.getElementById('btn-pick-end');
-const formError = document.getElementById('form-error');
-const btnSave = document.getElementById('btn-save');
-const btnAdd = document.getElementById('btn-add');
-const btnCancel = document.getElementById('btn-cancel');
-const btnLogout = document.getElementById('btn-logout');
-const btnRetry = document.getElementById('btn-retry');
-const loadingMsg = document.getElementById('loading-msg');
-const appStatus = document.getElementById('app-status');
-const statusMessage = document.getElementById('status-message');
-const colorSwatches = document.getElementById('color-swatches');
-const userBadge = document.getElementById('user-badge');
-const appVersion = document.getElementById('app-version');
-const datePicker = document.getElementById('date-picker');
-const datePickerTitle = document.getElementById('date-picker-title');
-const datePickerGrid = document.getElementById('date-picker-grid');
-const datePrev = document.getElementById('date-prev');
-const dateNext = document.getElementById('date-next');
-
-const authForm = document.getElementById('auth-form');
-const authUsernameRow = document.getElementById('auth-username-row');
-const authEmail = document.getElementById('auth-email');
-const authUsername = document.getElementById('auth-username');
-const authPassword = document.getElementById('auth-password');
-const authError = document.getElementById('auth-error');
-const authSubmit = document.getElementById('auth-submit');
-const authSwitch = document.getElementById('auth-switch');
-const authSwitchLabel = document.getElementById('auth-switch-label');
-const authKicker = document.getElementById('auth-kicker');
-const authTitle = document.getElementById('auth-title');
-const authSubtitle = document.getElementById('auth-subtitle');
-const authOAuth = document.getElementById('auth-oauth');
-const authGithub = document.getElementById('auth-github');
+const { api } = window.DaysUntilApi;
+const {
+  computeProgress,
+  formatDate,
+  formatISODate,
+  isValidISODate,
+  monthLabel,
+  parseDate,
+  statusLabel,
+  today,
+} = window.DaysUntilDates;
+const {
+  accountSummary,
+  appStatus,
+  appVersion,
+  appView,
+  authEmail,
+  authError,
+  authForm,
+  authGithub,
+  authKicker,
+  authOAuth,
+  authPassword,
+  authSubmit,
+  authSubtitle,
+  authSwitch,
+  authSwitchLabel,
+  authTitle,
+  authUsername,
+  authUsernameRow,
+  authView,
+  btnAdd,
+  btnCancel,
+  btnLogout,
+  btnPickEnd,
+  btnPickStart,
+  btnRetry,
+  btnSave,
+  colorSwatches,
+  dateNext,
+  datePicker,
+  datePickerGrid,
+  datePickerTitle,
+  datePrev,
+  fieldColor,
+  fieldEnd,
+  fieldId,
+  fieldName,
+  fieldShareGroup,
+  fieldStart,
+  form,
+  formError,
+  groupsBadge,
+  intervalFilterBar,
+  intervalTools,
+  isPublicView,
+  list,
+  loadingMsg,
+  modalTitle,
+  overlay,
+  profileDeleteAccount,
+  profileDisplayName,
+  profileError,
+  profileForm,
+  profilePanel,
+  profileSave,
+  publicGroupHeader,
+  publicGroupName,
+  publicGroupOwner,
+  publicGroupSlug,
+  shareGroupCreate,
+  shareGroupError,
+  shareGroupForm,
+  shareGroupName,
+  shareGroupsList,
+  shareGroupsPanel,
+  shareGroupsSummary,
+  statusMessage,
+  userBadge,
+} = window.DaysUntilDom;
+const { escHtml } = window.DaysUntilUtils;
 
 let isSubmitting = false;
 let isAuthSubmitting = false;
@@ -90,109 +98,6 @@ let statusTimer = null;
 let midnightTimer = null;
 let currentDayStamp = formatISODate(today());
 let currentPublicGroup = null;
-
-class ApiError extends Error {
-  constructor(message, status) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-  }
-}
-
-async function apiFetch(path, options = {}) {
-  let res;
-  try {
-    res = await fetch(path, {
-      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-      ...options,
-    });
-  } catch {
-    throw new ApiError('Network error. Check your connection and try again.', 0);
-  }
-
-  if (!res.ok) {
-    const msg = (await res.text()).trim();
-    throw new ApiError(msg || `Request failed with status ${res.status}.`, res.status);
-  }
-  if (res.status === 204) return null;
-  return res.json();
-}
-
-const api = {
-  version: () => apiFetch('/api/version'),
-  providers: () => apiFetch('/api/auth/providers'),
-  me: () => apiFetch('/api/me'),
-  deleteAccount: () => apiFetch('/api/me', { method: 'DELETE' }),
-  updateProfile: data => apiFetch('/api/me/profile', { method: 'PUT', body: JSON.stringify(data) }),
-  register: data => apiFetch('/api/register', { method: 'POST', body: JSON.stringify(data) }),
-  login: data => apiFetch('/api/login', { method: 'POST', body: JSON.stringify(data) }),
-  logout: () => apiFetch('/api/logout', { method: 'POST' }),
-  list: () => apiFetch('/api/intervals'),
-  create: data => apiFetch('/api/intervals', { method: 'POST', body: JSON.stringify(data) }),
-  move: (id, direction) => apiFetch(`/api/intervals/${id}/move`, { method: 'POST', body: JSON.stringify({ direction }) }),
-  update: (id, data) => apiFetch(`/api/intervals/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: id => apiFetch(`/api/intervals/${id}`, { method: 'DELETE' }),
-  listGroups: () => apiFetch('/api/share-groups'),
-  createGroup: data => apiFetch('/api/share-groups', { method: 'POST', body: JSON.stringify(data) }),
-  updateGroup: (id, data) => apiFetch(`/api/share-groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteGroup: id => apiFetch(`/api/share-groups/${id}`, { method: 'DELETE' }),
-  rotateGroup: id => apiFetch(`/api/share-groups/${id}/rotate`, { method: 'POST' }),
-  publicGroup: slug => apiFetch(`/api/public/groups/${encodeURIComponent(slug)}`),
-};
-
-function today() {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
-
-function parseDate(str) {
-  const [y, m, d] = str.split('-').map(Number);
-  return new Date(y, m - 1, d);
-}
-
-function isValidISODate(str) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return false;
-  const date = parseDate(str);
-  return formatISODate(date) === str;
-}
-
-function formatISODate(date) {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function diffDays(a, b) {
-  return Math.round((b - a) / 86400000);
-}
-
-function formatDate(str) {
-  const [y, m, d] = str.split('-');
-  return `${d}/${m}/${y}`;
-}
-
-function monthLabel(date) {
-  return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-}
-
-function computeProgress(iv) {
-  const now = today();
-  const start = parseDate(iv.start_date);
-  const end = parseDate(iv.end_date);
-  const total = diffDays(start, end);
-  const past = diffDays(start, now);
-  const left = diffDays(now, end);
-
-  if (now < start) {
-    return { status: 'upcoming', past: 0, left: diffDays(now, end), total, pct: 0 };
-  }
-  if (now > end) {
-    return { status: 'ended', past: diffDays(end, now), left: 0, total, pct: 100 };
-  }
-  const pct = total > 0 ? Math.round((past / total) * 100) : 100;
-  return { status: 'active', past, left, total, pct };
-}
 
 function nextMidnightDelay() {
   const now = new Date();
@@ -229,20 +134,6 @@ function refreshForDateChange() {
     renderDatePicker();
   }
   scheduleMidnightRefresh();
-}
-
-function statusLabel(status, progress) {
-  if (status === 'upcoming') return `starts in ${progress.left} day${progress.left !== 1 ? 's' : ''}`;
-  if (status === 'ended') return `ended ${progress.past} day${progress.past !== 1 ? 's' : ''} ago`;
-  return 'in progress';
-}
-
-function escHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 function renderShareGroupOptions(selectedID = null) {

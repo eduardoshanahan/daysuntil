@@ -1,0 +1,129 @@
+.interval-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.filter-chip {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+}
+
+.filter-chip.active {
+  border-color: var(--accent);
+  background: rgba(79, 142, 247, 0.12);
+  color: var(--text);
+}
+
+#interval-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.35rem;
+}
+
+.empty-msg {
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 3rem;
+}
+
+.card {
+  --card-color: #4f8ef7;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--card-color);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.12);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.card-name {
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.card-dates {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 0.1rem;
+  white-space: nowrap;
+}
+
+.total-days {
+  margin-left: 0.5rem;
+  color: var(--card-color);
+  font-weight: 600;
+}
+
+.card-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.card:hover .card-actions {
+  opacity: 1;
+}
+
+.card:focus-within .card-actions {
+  opacity: 1;
+}
+
+.progress-row {
+  display: grid;
+  grid-template-columns: max-content 1fr max-content;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.day-label {
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.day-label.past { color: var(--text-muted); text-align: right; }
+.day-label.left { color: var(--accent); text-align: left; }
+
+.bar-track {
+  height: 10px;
+  background: var(--bar-empty);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  background: var(--card-color);
+  border-radius: 99px;
+  transition: width 0.4s ease;
+  min-width: 0;
+}
+
+.status-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 99px;
+  font-weight: 600;
+  vertical-align: middle;
+  margin-left: 0.4rem;
+}
+
+.status-badge.upcoming  { background: var(--surface2); color: var(--text-muted); }
+.status-badge.active    { background: var(--accent-dim); color: var(--accent); }
+.status-badge.ended     { background: #2a1a1a; color: var(--danger); }
+.share-badge            { background: rgba(79, 142, 247, 0.18); color: #9ec0ff; }
+.private-badge          { background: rgba(122, 138, 170, 0.18); color: var(--text-muted); }
