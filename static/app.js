@@ -87,6 +87,9 @@ let activeIntervalFilter = 'all';
 let activeDateField = null;
 let visibleMonth = null;
 let statusTimer = null;
+let midnightTimer = null;
+let currentDayStamp = formatISODate(today());
+let currentPublicGroup = null;
 
 class ApiError extends Error {
   constructor(message, status) {
@@ -189,6 +192,43 @@ function computeProgress(iv) {
   }
   const pct = total > 0 ? Math.round((past / total) * 100) : 100;
   return { status: 'active', past, left, total, pct };
+}
+
+function nextMidnightDelay() {
+  const now = new Date();
+  const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  return Math.max(1000, nextMidnight.getTime() - now.getTime() + 1000);
+}
+
+function scheduleMidnightRefresh() {
+  if (midnightTimer) {
+    clearTimeout(midnightTimer);
+  }
+  midnightTimer = window.setTimeout(() => {
+    refreshForDateChange();
+  }, nextMidnightDelay());
+}
+
+function refreshForDateChange() {
+  const nextDayStamp = formatISODate(today());
+  if (nextDayStamp === currentDayStamp) {
+    scheduleMidnightRefresh();
+    return;
+  }
+
+  currentDayStamp = nextDayStamp;
+  if (isPublicView) {
+    if (currentPublicGroup) {
+      renderPublicGroup(currentPublicGroup);
+    }
+  } else if (currentUser) {
+    renderCurrentIntervals();
+  }
+
+  if (!datePicker.classList.contains('hidden')) {
+    renderDatePicker();
+  }
+  scheduleMidnightRefresh();
 }
 
 function statusLabel(status, progress) {
@@ -513,16 +553,8 @@ async function loadPublicGroup() {
   list.innerHTML = '<p class="empty-msg">Loading shared group...</p>';
   try {
     const group = await api.publicGroup(publicGroupSlug);
-    document.title = `${group.name} | Days Until`;
-    publicGroupName.textContent = group.name;
-    publicGroupOwner.textContent = group.owner_name
-      ? `Shared by ${group.owner_name}`
-      : `Shared by @${group.owner_username}`;
-    renderIntervals(group.intervals || [], {
-      showActions: false,
-      showShareBadge: false,
-      emptyMessage: 'No shared intervals to show yet.',
-    });
+    currentPublicGroup = group;
+    renderPublicGroup(group);
     clearStatus();
   } catch (err) {
     list.innerHTML = `<p class="empty-msg">${err.status === 404 ? 'Shared group not found.' : 'Unable to load shared group.'}</p>`;
@@ -530,6 +562,19 @@ async function loadPublicGroup() {
       showStatus(err.message, { tone: 'error' });
     }
   }
+}
+
+function renderPublicGroup(group) {
+  document.title = `${group.name} | Days Until`;
+  publicGroupName.textContent = group.name;
+  publicGroupOwner.textContent = group.owner_name
+    ? `Shared by ${group.owner_name}`
+    : `Shared by @${group.owner_username}`;
+  renderIntervals(group.intervals || [], {
+      showActions: false,
+      showShareBadge: false,
+      emptyMessage: 'No shared intervals to show yet.',
+  });
 }
 
 function openAdd() {
@@ -987,6 +1032,12 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeModal();
   if (event.key === 'Tab' && !overlay.classList.contains('hidden')) trapModalFocus(event);
 });
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    refreshForDateChange();
+  }
+});
+window.addEventListener('focus', refreshForDateChange);
 profilePanel.addEventListener('toggle', () => {
   userBadge.setAttribute('aria-expanded', profilePanel.open ? 'true' : 'false');
   if (!profilePanel.open) {
@@ -1197,7 +1248,9 @@ function initPublicView() {
 }
 
 if (isPublicView) {
+  scheduleMidnightRefresh();
   initPublicView();
 } else {
+  scheduleMidnightRefresh();
   initPrivateApp();
 }
