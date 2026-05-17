@@ -7,19 +7,24 @@ const isPublicView = publicGroupSlug !== '';
 
 const authView = document.getElementById('auth-view');
 const appView = document.getElementById('app-view');
+const intervalTools = document.getElementById('interval-tools');
+const intervalFilterBar = document.getElementById('interval-filter-bar');
 const list = document.getElementById('interval-list');
 const profilePanel = document.getElementById('profile-panel');
 const shareGroupsPanel = document.getElementById('share-groups-panel');
+const groupsBadge = document.getElementById('groups-badge');
 const profileForm = document.getElementById('profile-form');
 const profileDisplayName = document.getElementById('profile-display-name');
 const profileSave = document.getElementById('profile-save');
 const profileDeleteAccount = document.getElementById('profile-delete-account');
 const profileError = document.getElementById('profile-error');
+const accountSummary = document.getElementById('account-summary');
 const shareGroupForm = document.getElementById('share-group-form');
 const shareGroupName = document.getElementById('share-group-name');
 const shareGroupCreate = document.getElementById('share-group-create');
 const shareGroupError = document.getElementById('share-group-error');
 const shareGroupsList = document.getElementById('share-groups-list');
+const shareGroupsSummary = document.getElementById('share-groups-summary');
 const publicGroupHeader = document.getElementById('public-group-header');
 const publicGroupName = document.getElementById('public-group-name');
 const publicGroupOwner = document.getElementById('public-group-owner');
@@ -77,8 +82,11 @@ const pendingDeleteIds = new Set();
 let lastFocusedElement = null;
 let currentUser = null;
 let currentShareGroups = [];
+let currentIntervals = [];
+let activeIntervalFilter = 'all';
 let activeDateField = null;
 let visibleMonth = null;
+let statusTimer = null;
 
 class ApiError extends Error {
   constructor(message, status) {
@@ -118,6 +126,7 @@ const api = {
   logout: () => apiFetch('/api/logout', { method: 'POST' }),
   list: () => apiFetch('/api/intervals'),
   create: data => apiFetch('/api/intervals', { method: 'POST', body: JSON.stringify(data) }),
+  move: (id, direction) => apiFetch(`/api/intervals/${id}/move`, { method: 'POST', body: JSON.stringify({ direction }) }),
   update: (id, data) => apiFetch(`/api/intervals/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: id => apiFetch(`/api/intervals/${id}`, { method: 'DELETE' }),
   listGroups: () => apiFetch('/api/share-groups'),
@@ -207,11 +216,99 @@ function renderShareGroupOptions(selectedID = null) {
   fieldShareGroup.value = selectedID == null ? '' : String(selectedID);
 }
 
+function intervalCountsByGroup() {
+  const counts = new Map();
+  let privateCount = 0;
+  for (const interval of currentIntervals) {
+    if (interval.share_group_id == null) {
+      privateCount += 1;
+      continue;
+    }
+    counts.set(interval.share_group_id, (counts.get(interval.share_group_id) || 0) + 1);
+  }
+  return { counts, privateCount, total: currentIntervals.length };
+}
+
+function filteredIntervals() {
+  if (activeIntervalFilter === 'all') return currentIntervals;
+  if (activeIntervalFilter === 'private') {
+    return currentIntervals.filter(interval => interval.share_group_id == null);
+  }
+  const groupID = Number(activeIntervalFilter);
+  return currentIntervals.filter(interval => interval.share_group_id === groupID);
+}
+
+function renderIntervalFilters() {
+  if (!currentUser || isPublicView) {
+    intervalTools.classList.add('hidden');
+    intervalFilterBar.innerHTML = '';
+    return;
+  }
+
+  intervalTools.classList.remove('hidden');
+  const { counts, privateCount, total } = intervalCountsByGroup();
+  const filterItems = [
+    { key: 'all', label: `All (${total})` },
+    { key: 'private', label: `Private (${privateCount})` },
+    ...currentShareGroups.map(group => ({
+      key: String(group.id),
+      label: `${group.name} (${counts.get(group.id) || 0})`,
+    })),
+  ];
+
+  if (activeIntervalFilter !== 'all' && activeIntervalFilter !== 'private' && !currentShareGroups.some(group => String(group.id) === activeIntervalFilter)) {
+    activeIntervalFilter = 'all';
+  }
+
+  intervalFilterBar.innerHTML = '';
+  for (const item of filterItems) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `filter-chip${activeIntervalFilter === item.key ? ' active' : ''}`;
+    button.textContent = item.label;
+    button.addEventListener('click', () => {
+      if (activeIntervalFilter === item.key) return;
+      activeIntervalFilter = item.key;
+      renderIntervalFilters();
+      renderIntervals(filteredIntervals(), {
+        showActions: true,
+        emptyMessage: 'No intervals match this filter.',
+      });
+    });
+    intervalFilterBar.appendChild(button);
+  }
+}
+
+function updateManagementSummaries() {
+  if (!currentUser) {
+    accountSummary.textContent = 'Manage your display name and account settings.';
+    shareGroupsSummary.textContent = 'Create public collections of related intervals.';
+    profilePanel.classList.add('hidden');
+    profilePanel.open = false;
+    shareGroupsPanel.classList.add('hidden');
+    shareGroupsPanel.open = false;
+    userBadge.setAttribute('aria-expanded', 'false');
+    groupsBadge.setAttribute('aria-expanded', 'false');
+    return;
+  }
+
+  accountSummary.textContent = `Signed in as ${currentUser.display_name || currentUser.username}.`;
+  const { counts, total } = intervalCountsByGroup();
+  let sharedIntervals = 0;
+  for (const count of counts.values()) sharedIntervals += count;
+  const groupCount = currentShareGroups.length;
+  shareGroupsSummary.textContent = `${groupCount} group${groupCount !== 1 ? 's' : ''}, ${sharedIntervals} shared interval${sharedIntervals !== 1 ? 's' : ''}, ${total - sharedIntervals} private.`;
+  userBadge.setAttribute('aria-expanded', profilePanel.open ? 'true' : 'false');
+  groupsBadge.setAttribute('aria-expanded', shareGroupsPanel.open ? 'true' : 'false');
+}
+
 function renderCard(iv, options = {}) {
   const progress = computeProgress(iv);
   const isDeleting = pendingDeleteIds.has(iv.id);
   const showActions = options.showActions === true;
   const showShareBadge = options.showShareBadge !== false;
+  const canMoveUp = options.canMoveUp === true;
+  const canMoveDown = options.canMoveDown === true;
 
   const card = document.createElement('div');
   card.className = 'card';
@@ -235,8 +332,10 @@ function renderCard(iv, options = {}) {
 
   const actions = showActions
     ? `<div class="card-actions">
-        <button class="btn-icon btn-edit" title="Edit" aria-label="Edit ${escHtml(iv.name)}" ${isDeleting ? 'disabled' : ''}>Edit</button>
-        <button class="btn-icon danger btn-delete" title="Delete" aria-label="${isDeleting ? `Deleting ${escHtml(iv.name)}` : `Delete ${escHtml(iv.name)}`}" ${isDeleting ? 'disabled' : ''}>${isDeleting ? 'Deleting...' : 'Delete'}</button>
+        <button type="button" class="btn-icon btn-move-up" title="Move up" aria-label="Move ${escHtml(iv.name)} up" ${!canMoveUp || isDeleting ? 'disabled' : ''}>Up</button>
+        <button type="button" class="btn-icon btn-move-down" title="Move down" aria-label="Move ${escHtml(iv.name)} down" ${!canMoveDown || isDeleting ? 'disabled' : ''}>Down</button>
+        <button type="button" class="btn-icon btn-edit" title="Edit" aria-label="Edit ${escHtml(iv.name)}" ${isDeleting ? 'disabled' : ''}>Edit</button>
+        <button type="button" class="btn-icon danger btn-delete" title="Delete" aria-label="${isDeleting ? `Deleting ${escHtml(iv.name)}` : `Delete ${escHtml(iv.name)}`}" ${isDeleting ? 'disabled' : ''}>${isDeleting ? 'Deleting...' : 'Delete'}</button>
       </div>`
     : '';
 
@@ -250,16 +349,11 @@ function renderCard(iv, options = {}) {
     </div>
     <div class="progress-row">
       <span class="day-label past">${pastText}</span>
-      <div class="bar-track"><div class="bar-fill" style="width:${progress.pct}%"></div></div>
+      <div class="bar-track"><div class="bar-fill"></div></div>
       <span class="day-label left">${leftText}</span>
     </div>
   `;
-
-  if (showActions) {
-    card.querySelector('.btn-edit').addEventListener('click', () => openEdit(iv));
-    card.querySelector('.btn-delete').addEventListener('click', () => confirmDelete(iv));
-  }
-
+  card.querySelector('.bar-fill').style.width = `${progress.pct}%`;
   return card;
 }
 
@@ -272,13 +366,17 @@ function setCurrentUser(user) {
   btnAdd.classList.toggle('hidden', !isAuthenticated || isPublicView);
   btnLogout.classList.toggle('hidden', !isAuthenticated || isPublicView);
   userBadge.classList.toggle('hidden', !isAuthenticated || isPublicView);
-  profilePanel.classList.toggle('hidden', !isAuthenticated || isPublicView);
-  shareGroupsPanel.classList.toggle('hidden', !isAuthenticated || isPublicView);
+  groupsBadge.classList.toggle('hidden', !isAuthenticated || isPublicView);
   publicGroupHeader.classList.toggle('hidden', !isPublicView);
 
   if (isAuthenticated) {
+    profilePanel.classList.add('hidden');
+    profilePanel.open = false;
+    shareGroupsPanel.classList.add('hidden');
+    shareGroupsPanel.open = false;
     userBadge.textContent = user.display_name || user.username;
     profileDisplayName.value = user.display_name || user.username;
+    updateManagementSummaries();
     authEmail.value = '';
     authUsername.value = '';
     authPassword.value = '';
@@ -286,8 +384,13 @@ function setCurrentUser(user) {
   } else {
     userBadge.textContent = '';
     currentShareGroups = [];
+    currentIntervals = [];
+    activeIntervalFilter = 'all';
     renderShareGroupOptions();
     shareGroupsList.innerHTML = '';
+    intervalTools.classList.add('hidden');
+    intervalFilterBar.innerHTML = '';
+    updateManagementSummaries();
     btnAdd.disabled = false;
     closeModal(true);
   }
@@ -299,7 +402,20 @@ function renderIntervals(intervals, options = {}) {
     list.innerHTML = `<p class="empty-msg">${options.emptyMessage || 'No intervals yet.'}</p>`;
     return;
   }
-  intervals.forEach(iv => list.appendChild(renderCard(iv, options)));
+  intervals.forEach((iv, index) => list.appendChild(renderCard(iv, {
+    ...options,
+    canMoveUp: options.showActions === true && index > 0,
+    canMoveDown: options.showActions === true && index < intervals.length - 1,
+  })));
+}
+
+function renderCurrentIntervals(options = {}) {
+  renderIntervalFilters();
+  updateManagementSummaries();
+  renderIntervals(filteredIntervals(), {
+    showActions: true,
+    emptyMessage: options.emptyMessage || 'No intervals yet. Add your first one above.',
+  });
 }
 
 function setVersionLabel(label) {
@@ -318,10 +434,8 @@ async function loadIntervals(options = {}) {
   try {
     const intervals = await api.list();
     if (loadToken !== activeLoadToken) return;
-    renderIntervals(intervals, {
-      showActions: true,
-      emptyMessage: 'No intervals yet. Add your first one above.',
-    });
+    currentIntervals = intervals || [];
+    renderCurrentIntervals();
     if (!preserveStatus) clearStatus();
   } catch (err) {
     if (loadToken !== activeLoadToken) return;
@@ -342,19 +456,24 @@ function renderShareGroups() {
     return;
   }
 
+  const { counts } = intervalCountsByGroup();
   shareGroupsList.innerHTML = '';
   currentShareGroups.forEach(group => {
     const card = document.createElement('div');
     card.className = 'share-group-card';
     const publicURL = `${window.location.origin}/g/${group.public_slug}`;
+    const groupCount = counts.get(group.id) || 0;
     card.innerHTML = `
       <label class="share-group-label" for="share-group-edit-${group.id}">Group name</label>
       <div class="share-group-edit-row">
         <input id="share-group-edit-${group.id}" type="text" value="${escHtml(group.name)}" maxlength="80" ${isShareGroupSubmitting ? 'disabled' : ''} />
         <button type="button" class="btn-secondary btn-group-save" ${isShareGroupSubmitting ? 'disabled' : ''}>Save</button>
       </div>
+      <p class="share-group-meta">${groupCount} interval${groupCount !== 1 ? 's' : ''} in this group</p>
       <p><a class="profile-link" target="_blank" rel="noopener noreferrer" href="${publicURL}">${publicURL}</a></p>
       <div class="share-group-actions">
+        <button type="button" class="btn-secondary btn-group-open" ${isShareGroupSubmitting ? 'disabled' : ''}>Open</button>
+        <button type="button" class="btn-secondary btn-group-filter" ${isShareGroupSubmitting ? 'disabled' : ''}>Show in list</button>
         <button type="button" class="btn-secondary btn-group-rotate" ${isShareGroupSubmitting ? 'disabled' : ''}>Rotate link</button>
         <button type="button" class="btn-secondary danger btn-group-delete" ${isShareGroupSubmitting ? 'disabled' : ''}>Delete group</button>
       </div>
@@ -362,6 +481,15 @@ function renderShareGroups() {
 
     const nameInput = card.querySelector(`#share-group-edit-${group.id}`);
     card.querySelector('.btn-group-save').addEventListener('click', () => saveShareGroup(group.id, nameInput.value.trim()));
+    card.querySelector('.btn-group-open').addEventListener('click', () => window.open(publicURL, '_blank', 'noopener,noreferrer'));
+    card.querySelector('.btn-group-filter').addEventListener('click', () => {
+      activeIntervalFilter = String(group.id);
+      renderIntervalFilters();
+      renderIntervals(filteredIntervals(), {
+        showActions: true,
+        emptyMessage: 'No intervals match this filter.',
+      });
+    });
     card.querySelector('.btn-group-rotate').addEventListener('click', () => rotateShareGroup(group));
     card.querySelector('.btn-group-delete').addEventListener('click', () => removeShareGroup(group));
     shareGroupsList.appendChild(card);
@@ -372,7 +500,12 @@ async function loadShareGroups() {
   if (!currentUser) return;
   const groups = await api.listGroups();
   currentShareGroups = groups || [];
+  if (currentShareGroups.length === 0) {
+    shareGroupsPanel.open = true;
+  }
   renderShareGroupOptions();
+  renderIntervalFilters();
+  updateManagementSummaries();
   renderShareGroups();
 }
 
@@ -576,15 +709,28 @@ function setSubmitting(nextValue) {
 }
 
 function showStatus(message, options = {}) {
+  if (statusTimer) {
+    clearTimeout(statusTimer);
+    statusTimer = null;
+  }
   statusMessage.textContent = message;
   appStatus.classList.remove('hidden', 'error');
   appStatus.setAttribute('role', options.tone === 'error' ? 'alert' : 'status');
   appStatus.setAttribute('aria-live', options.tone === 'error' ? 'assertive' : 'polite');
   if (options.tone === 'error') appStatus.classList.add('error');
   btnRetry.classList.toggle('hidden', !options.retry);
+  if (options.autoHide !== false && options.tone !== 'error') {
+    statusTimer = window.setTimeout(() => {
+      clearStatus();
+    }, options.duration || 2500);
+  }
 }
 
 function clearStatus() {
+  if (statusTimer) {
+    clearTimeout(statusTimer);
+    statusTimer = null;
+  }
   statusMessage.textContent = '';
   appStatus.classList.add('hidden');
   appStatus.classList.remove('error');
@@ -641,6 +787,33 @@ async function confirmDelete(iv) {
     if (currentUser) {
       await loadIntervals({ preserveStatus: keepStatus });
     }
+  }
+}
+
+async function moveIntervalInList(iv, direction) {
+  if (!currentUser) return;
+  const currentIndex = currentIntervals.findIndex(interval => interval.id === iv.id);
+  if (currentIndex === -1) return;
+
+  const swapIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+  if (swapIndex < 0 || swapIndex >= currentIntervals.length) return;
+
+  const reordered = [...currentIntervals];
+  [reordered[currentIndex], reordered[swapIndex]] = [reordered[swapIndex], reordered[currentIndex]];
+  currentIntervals = reordered;
+  renderCurrentIntervals();
+  showStatus(`Moved "${iv.name}" ${direction}.`, { tone: 'status' });
+
+  try {
+    await api.move(iv.id, direction);
+    await loadIntervals({ preserveStatus: true });
+  } catch (err) {
+    if (err.status === 401) {
+      handleUnauthorized('Your session has ended. Log in again.');
+      return;
+    }
+    await loadIntervals({ preserveStatus: true });
+    showStatus(err.message, { retry: true, tone: 'error' });
   }
 }
 
@@ -708,6 +881,57 @@ async function removeShareGroup(group) {
 
 btnAdd.addEventListener('click', openAdd);
 btnCancel.addEventListener('click', closeModal);
+list.addEventListener('click', event => {
+  const button = event.target.closest('button');
+  if (!button || button.disabled) return;
+
+  const card = button.closest('.card');
+  if (!card) return;
+
+  const id = Number(card.dataset.id);
+  const interval = currentIntervals.find(item => item.id === id);
+  if (!interval) return;
+
+  if (button.classList.contains('btn-move-up')) {
+    event.preventDefault();
+    moveIntervalInList(interval, 'up');
+    return;
+  }
+  if (button.classList.contains('btn-move-down')) {
+    event.preventDefault();
+    moveIntervalInList(interval, 'down');
+    return;
+  }
+  if (button.classList.contains('btn-edit')) {
+    event.preventDefault();
+    openEdit(interval);
+    return;
+  }
+  if (button.classList.contains('btn-delete')) {
+    event.preventDefault();
+    confirmDelete(interval);
+  }
+});
+userBadge.addEventListener('click', () => {
+  if (!currentUser || isPublicView) return;
+  const nextHidden = !profilePanel.classList.contains('hidden');
+  profilePanel.classList.toggle('hidden', nextHidden);
+  profilePanel.open = !nextHidden;
+  userBadge.setAttribute('aria-expanded', profilePanel.open ? 'true' : 'false');
+  if (profilePanel.open) {
+    profilePanel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+});
+groupsBadge.addEventListener('click', () => {
+  if (!currentUser || isPublicView) return;
+  const nextHidden = !shareGroupsPanel.classList.contains('hidden');
+  shareGroupsPanel.classList.toggle('hidden', nextHidden);
+  shareGroupsPanel.open = !nextHidden;
+  groupsBadge.setAttribute('aria-expanded', shareGroupsPanel.open ? 'true' : 'false');
+  if (shareGroupsPanel.open) {
+    shareGroupsPanel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+});
 btnLogout.addEventListener('click', async () => {
   try {
     await api.logout();
@@ -762,6 +986,18 @@ document.addEventListener('click', event => {
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeModal();
   if (event.key === 'Tab' && !overlay.classList.contains('hidden')) trapModalFocus(event);
+});
+profilePanel.addEventListener('toggle', () => {
+  userBadge.setAttribute('aria-expanded', profilePanel.open ? 'true' : 'false');
+  if (!profilePanel.open) {
+    profilePanel.classList.add('hidden');
+  }
+});
+shareGroupsPanel.addEventListener('toggle', () => {
+  groupsBadge.setAttribute('aria-expanded', shareGroupsPanel.open ? 'true' : 'false');
+  if (!shareGroupsPanel.open) {
+    shareGroupsPanel.classList.add('hidden');
+  }
 });
 
 authForm.addEventListener('submit', async event => {

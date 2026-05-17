@@ -86,6 +86,7 @@ func newRouter(h *handler) http.Handler {
 		r.Use(authMiddleware(h))
 		r.Get("/", h.listIntervals)
 		r.Post("/", h.createInterval)
+		r.Post("/{id}/move", h.moveInterval)
 		r.Put("/{id}", h.updateInterval)
 		r.Delete("/{id}", h.deleteInterval)
 	})

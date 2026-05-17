@@ -17,7 +17,8 @@
     </div>
     <h1><a class="title-link" href="https://github.com/eduardoshanahan/daysuntil.git">Days Until</a></h1>
     <div class="header-actions">
-      <span id="user-badge" class="user-badge hidden"></span>
+      <button id="user-badge" type="button" class="user-badge hidden" aria-controls="profile-panel" aria-expanded="false"></button>
+      <button id="groups-badge" type="button" class="user-badge hidden" aria-controls="share-groups-panel" aria-expanded="false">Groups</button>
       <button id="btn-logout" type="button" class="btn-secondary hidden">Log out</button>
       <button id="btn-add" class="btn-primary hidden">+ Add</button>
     </div>
@@ -73,43 +74,63 @@
       <p id="public-group-owner" class="public-profile-username"></p>
     </section>
 
+    <section id="interval-tools" class="profile-panel hidden">
+      <div>
+        <p class="profile-kicker">Interval view</p>
+        <p class="profile-help">Filter your private list by share group.</p>
+      </div>
+      <div id="interval-filter-bar" class="interval-filter-bar"></div>
+    </section>
+
     <section id="interval-list">
       <p id="loading-msg" class="empty-msg">Loading intervals...</p>
     </section>
 
-    <section id="profile-panel" class="profile-panel hidden">
-      <div>
-        <p class="profile-kicker">Account</p>
+    <details id="profile-panel" class="profile-panel detail-panel hidden">
+      <summary class="panel-summary">
+        <div>
+          <p class="profile-kicker">Account</p>
+          <p id="account-summary" class="panel-summary-text">Manage your display name and account settings.</p>
+        </div>
+        <span class="panel-toggle" aria-hidden="true"></span>
+      </summary>
+      <div class="panel-body">
         <p class="profile-help">Update your display name for public share-group pages.</p>
-      </div>
-      <form id="profile-form" class="profile-form" novalidate>
-        <label for="profile-display-name">Display name</label>
-        <div class="profile-form-row">
-          <input type="text" id="profile-display-name" maxlength="80" required />
-          <button id="profile-save" type="submit" class="btn-secondary">Save</button>
+        <form id="profile-form" class="profile-form" novalidate>
+          <label for="profile-display-name">Display name</label>
+          <div class="profile-form-row">
+            <input type="text" id="profile-display-name" maxlength="80" required />
+            <button id="profile-save" type="submit" class="btn-secondary">Save</button>
+          </div>
+          <p id="profile-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
+        </form>
+        <div class="profile-danger">
+          <button id="profile-delete-account" type="button" class="btn-secondary danger">Delete account</button>
         </div>
-        <p id="profile-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
-      </form>
-      <div class="profile-danger">
-        <button id="profile-delete-account" type="button" class="btn-secondary danger">Delete account</button>
       </div>
-    </section>
+    </details>
 
-    <section id="share-groups-panel" class="profile-panel hidden">
-      <div>
-        <p class="profile-kicker">Share groups</p>
-        <p class="profile-help">Create public collections of related intervals. Intervals with no group stay private.</p>
-      </div>
-      <form id="share-group-form" class="profile-form" novalidate>
-        <label for="share-group-name">New group</label>
-        <div class="profile-form-row">
-          <input type="text" id="share-group-name" maxlength="80" placeholder="e.g. Trips" required />
-          <button id="share-group-create" type="submit" class="btn-secondary">Create</button>
+    <details id="share-groups-panel" class="profile-panel detail-panel hidden">
+      <summary class="panel-summary">
+        <div>
+          <p class="profile-kicker">Share groups</p>
+          <p id="share-groups-summary" class="panel-summary-text">Create public collections of related intervals.</p>
         </div>
-        <p id="share-group-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
-      </form>
-      <div id="share-groups-list" class="share-groups-list"></div>
-    </section>
+        <span class="panel-toggle" aria-hidden="true"></span>
+      </summary>
+      <div class="panel-body">
+        <p class="profile-help">Create public collections of related intervals. Intervals with no group stay private.</p>
+        <form id="share-group-form" class="profile-form" novalidate>
+          <label for="share-group-name">New group</label>
+          <div class="profile-form-row">
+            <input type="text" id="share-group-name" maxlength="80" placeholder="e.g. Trips" required />
+            <button id="share-group-create" type="submit" class="btn-secondary">Create</button>
+          </div>
+          <p id="share-group-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
+        </form>
+        <div id="share-groups-list" class="share-groups-list"></div>
+      </div>
+    </details>
   </main>
 
   <section id="app-status" class="app-status hidden" role="status" aria-live="polite">
@@ -141,26 +162,26 @@
         <div class="color-row">
           <input type="color" id="field-color" value="#4f8ef7" aria-label="Choose custom color" />
           <span id="color-swatches" class="color-swatches">
-            <button type="button" class="swatch" data-color="#4f8ef7" style="background:#4f8ef7" aria-label="Use blue color"></button>
-            <button type="button" class="swatch" data-color="#e05c5c" style="background:#e05c5c" aria-label="Use red color"></button>
-            <button type="button" class="swatch" data-color="#50c878" style="background:#50c878" aria-label="Use green color"></button>
-            <button type="button" class="swatch" data-color="#f5a623" style="background:#f5a623" aria-label="Use orange color"></button>
-            <button type="button" class="swatch" data-color="#b47cf7" style="background:#b47cf7" aria-label="Use violet color"></button>
-            <button type="button" class="swatch" data-color="#40c4c4" style="background:#40c4c4" aria-label="Use teal color"></button>
-            <button type="button" class="swatch" data-color="#f06292" style="background:#f06292" aria-label="Use pink color"></button>
-            <button type="button" class="swatch" data-color="#8d6e63" style="background:#8d6e63" aria-label="Use brown color"></button>
-            <button type="button" class="swatch" data-color="#9ccc65" style="background:#9ccc65" aria-label="Use lime color"></button>
-            <button type="button" class="swatch" data-color="#ffd54f" style="background:#ffd54f" aria-label="Use amber color"></button>
-            <button type="button" class="swatch" data-color="#7986cb" style="background:#7986cb" aria-label="Use indigo color"></button>
-            <button type="button" class="swatch" data-color="#90a4ae" style="background:#90a4ae" aria-label="Use slate color"></button>
-            <button type="button" class="swatch" data-color="#26a69a" style="background:#26a69a" aria-label="Use sea green color"></button>
-            <button type="button" class="swatch" data-color="#ef5350" style="background:#ef5350" aria-label="Use coral red color"></button>
-            <button type="button" class="swatch" data-color="#ab47bc" style="background:#ab47bc" aria-label="Use orchid color"></button>
-            <button type="button" class="swatch" data-color="#5c6bc0" style="background:#5c6bc0" aria-label="Use royal blue color"></button>
-            <button type="button" class="swatch" data-color="#29b6f6" style="background:#29b6f6" aria-label="Use sky blue color"></button>
-            <button type="button" class="swatch" data-color="#ff8a65" style="background:#ff8a65" aria-label="Use peach color"></button>
-            <button type="button" class="swatch" data-color="#66bb6a" style="background:#66bb6a" aria-label="Use leaf green color"></button>
-            <button type="button" class="swatch" data-color="#b0bec5" style="background:#b0bec5" aria-label="Use light slate color"></button>
+            <button type="button" class="swatch" data-color="#4f8ef7" aria-label="Use blue color"></button>
+            <button type="button" class="swatch" data-color="#e05c5c" aria-label="Use red color"></button>
+            <button type="button" class="swatch" data-color="#50c878" aria-label="Use green color"></button>
+            <button type="button" class="swatch" data-color="#f5a623" aria-label="Use orange color"></button>
+            <button type="button" class="swatch" data-color="#b47cf7" aria-label="Use violet color"></button>
+            <button type="button" class="swatch" data-color="#40c4c4" aria-label="Use teal color"></button>
+            <button type="button" class="swatch" data-color="#f06292" aria-label="Use pink color"></button>
+            <button type="button" class="swatch" data-color="#8d6e63" aria-label="Use brown color"></button>
+            <button type="button" class="swatch" data-color="#9ccc65" aria-label="Use lime color"></button>
+            <button type="button" class="swatch" data-color="#ffd54f" aria-label="Use amber color"></button>
+            <button type="button" class="swatch" data-color="#7986cb" aria-label="Use indigo color"></button>
+            <button type="button" class="swatch" data-color="#90a4ae" aria-label="Use slate color"></button>
+            <button type="button" class="swatch" data-color="#26a69a" aria-label="Use sea green color"></button>
+            <button type="button" class="swatch" data-color="#ef5350" aria-label="Use coral red color"></button>
+            <button type="button" class="swatch" data-color="#ab47bc" aria-label="Use orchid color"></button>
+            <button type="button" class="swatch" data-color="#5c6bc0" aria-label="Use royal blue color"></button>
+            <button type="button" class="swatch" data-color="#29b6f6" aria-label="Use sky blue color"></button>
+            <button type="button" class="swatch" data-color="#ff8a65" aria-label="Use peach color"></button>
+            <button type="button" class="swatch" data-color="#66bb6a" aria-label="Use leaf green color"></button>
+            <button type="button" class="swatch" data-color="#b0bec5" aria-label="Use light slate color"></button>
           </span>
         </div>
 

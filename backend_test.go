@@ -578,6 +578,87 @@ func TestDeletingShareGroupMakesItsIntervalsPrivate(t *testing.T) {
 	}
 }
 
+func TestMoveIntervalReordersList(t *testing.T) {
+	_, router := newTestServer(t)
+
+	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+
+	for _, name := range []string{"One", "Two", "Three"} {
+		create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
+			"name":"`+name+`",
+			"start_date":"2026-05-20",
+			"end_date":"2026-05-21",
+			"color":"#4f8ef7",
+			"share_group_id":null
+		}`, cookie)
+		if create.Code != http.StatusCreated {
+			t.Fatalf("expected 201 creating interval %q, got %d (%s)", name, create.Code, create.Body.String())
+		}
+	}
+
+	move := performRequest(t, router, http.MethodPost, "/api/intervals/3/move", `{"direction":"up"}`, cookie)
+	if move.Code != http.StatusOK {
+		t.Fatalf("expected 200 moving interval, got %d (%s)", move.Code, move.Body.String())
+	}
+
+	rec := performRequest(t, router, http.MethodGet, "/api/intervals", "", cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 listing intervals, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	var intervals []Interval
+	if err := json.NewDecoder(rec.Body).Decode(&intervals); err != nil {
+		t.Fatalf("decode intervals: %v", err)
+	}
+	if got := []string{intervals[0].Name, intervals[1].Name, intervals[2].Name}; strings.Join(got, ",") != "One,Three,Two" {
+		t.Fatalf("unexpected interval order: %#v", got)
+	}
+}
+
+func TestMoveIntervalNormalizesLegacyZeroPositions(t *testing.T) {
+	db, router := newTestServer(t)
+
+	cookie, user := registerUser(t, router, "legacy@example.com", "legacy", "password123")
+
+	for _, name := range []string{"First", "Second"} {
+		create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
+			"name":"`+name+`",
+			"start_date":"2026-05-20",
+			"end_date":"2026-05-21",
+			"color":"#4f8ef7",
+			"share_group_id":null
+		}`, cookie)
+		if create.Code != http.StatusCreated {
+			t.Fatalf("expected 201 creating interval %q, got %d (%s)", name, create.Code, create.Body.String())
+		}
+	}
+
+	if _, err := db.Exec(`UPDATE intervals SET position=0 WHERE user_id=?`, user.ID); err != nil {
+		t.Fatalf("reset positions to legacy zero values: %v", err)
+	}
+
+	move := performRequest(t, router, http.MethodPost, "/api/intervals/2/move", `{"direction":"up"}`, cookie)
+	if move.Code != http.StatusOK {
+		t.Fatalf("expected 200 moving interval with legacy positions, got %d (%s)", move.Code, move.Body.String())
+	}
+
+	rec := performRequest(t, router, http.MethodGet, "/api/intervals", "", cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 listing intervals, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	var intervals []Interval
+	if err := json.NewDecoder(rec.Body).Decode(&intervals); err != nil {
+		t.Fatalf("decode intervals: %v", err)
+	}
+	if got := []string{intervals[0].Name, intervals[1].Name}; strings.Join(got, ",") != "Second,First" {
+		t.Fatalf("unexpected interval order after normalization: %#v", got)
+	}
+	if intervals[0].Position != 1 || intervals[1].Position != 2 {
+		t.Fatalf("expected normalized positions 1 and 2, got %#v", intervals)
+	}
+}
+
 func TestLoginRateLimitReturnsTooManyRequests(t *testing.T) {
 	limiter := newAuthRateLimiter()
 	limiter.now = func() time.Time {

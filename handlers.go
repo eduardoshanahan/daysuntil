@@ -22,6 +22,10 @@ type shareGroupPayload struct {
 	Name string `json:"name"`
 }
 
+type moveIntervalPayload struct {
+	Direction string `json:"direction"`
+}
+
 type versionResponse struct {
 	Version string `json:"version"`
 }
@@ -141,6 +145,45 @@ func (h *handler) deleteInterval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) moveInterval(w http.ResponseWriter, r *http.Request) {
+	user, err := userFromContext(r.Context())
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	var payload moveIntervalPayload
+	if err := decodeJSONBody(w, r, &payload); err != nil {
+		return
+	}
+	if payload.Direction != "up" && payload.Direction != "down" {
+		http.Error(w, "direction must be up or down", http.StatusBadRequest)
+		return
+	}
+
+	if err := moveInterval(h.db, user.ID, id, payload.Direction); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	updated, err := intervalByID(h.db, user.ID, id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, updated)
 }
 
 func (h *handler) register(w http.ResponseWriter, r *http.Request) {
