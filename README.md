@@ -5,10 +5,11 @@ A small homelab web application to track named time intervals. For each interval
 ## Features
 
 - Local email/password accounts with separate public usernames
-- Human-readable public sharing links generated from a word-based slug
+- Human-readable share-group links generated from a word-based slug
 - Optional GitHub OAuth alongside local login
 - Basic in-memory rate limiting on login and registration endpoints
 - Add, edit, and delete named intervals (start date → end date)
+- Create share groups and assign intervals to them
 - Progress bar showing current position within the interval
 - Per-interval accent color with a color picker and presets
 - Status badge: upcoming / in progress / ended
@@ -30,10 +31,10 @@ Data is stored in a named Docker volume (`daysuntil-data`) and survives containe
 Public sharing uses routes like:
 
 ```text
-/p/forest-harbor-otter
+/g/forest-harbor-otter
 ```
 
-These links are generated per account and are separate from the login email and username.
+These links are generated per share group. Intervals with no share group stay private.
 
 ### Docker Compose environment
 
@@ -119,6 +120,8 @@ If you want a separate database for a specific run:
 ```bash
 DB_PATH=/tmp/daysuntil-dev.db nix develop -c go run .
 ```
+
+Private intervals remain visible only in your own account. To share one or more intervals publicly, create a share group in the UI and assign intervals to it.
 
 ### Local GitHub OAuth testing
 

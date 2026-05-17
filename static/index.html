@@ -27,7 +27,7 @@
     <div class="auth-card">
       <p id="auth-kicker" class="auth-kicker">Login</p>
       <h2 id="auth-title">Sign in to your account</h2>
-      <p id="auth-subtitle" class="auth-subtitle">Your intervals stay private to your account.</p>
+      <p id="auth-subtitle" class="auth-subtitle">Your intervals stay private until you place them in a share group.</p>
 
       <form id="auth-form" class="auth-form" novalidate>
         <div id="auth-email-row">
@@ -67,10 +67,10 @@
   </section>
 
   <main id="app-view" class="hidden">
-    <section id="public-profile-header" class="public-profile-header hidden">
-      <p class="profile-kicker">Public profile</p>
-      <h2 id="public-profile-name"></h2>
-      <p id="public-profile-username" class="public-profile-username"></p>
+    <section id="public-group-header" class="public-profile-header hidden">
+      <p class="profile-kicker">Shared group</p>
+      <h2 id="public-group-name"></h2>
+      <p id="public-group-owner" class="public-profile-username"></p>
     </section>
 
     <section id="interval-list">
@@ -79,11 +79,8 @@
 
     <section id="profile-panel" class="profile-panel hidden">
       <div>
-        <p class="profile-kicker">Public profile</p>
-        <p><a id="profile-link" class="profile-link" target="_blank" rel="noopener noreferrer"></a></p>
-        <p class="profile-help">
-          Public intervals stay visible on this link until you make them private again or rotate the link.
-        </p>
+        <p class="profile-kicker">Account</p>
+        <p class="profile-help">Update your display name for public share-group pages.</p>
       </div>
       <form id="profile-form" class="profile-form" novalidate>
         <label for="profile-display-name">Display name</label>
@@ -93,15 +90,25 @@
         </div>
         <p id="profile-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
       </form>
-      <div class="profile-form-row">
-        <button id="profile-make-private" type="button" class="btn-secondary">Make all intervals private</button>
-      </div>
-      <div class="profile-form-row">
-        <button id="profile-rotate-link" type="button" class="btn-secondary">Rotate public link</button>
-      </div>
       <div class="profile-danger">
         <button id="profile-delete-account" type="button" class="btn-secondary danger">Delete account</button>
       </div>
+    </section>
+
+    <section id="share-groups-panel" class="profile-panel hidden">
+      <div>
+        <p class="profile-kicker">Share groups</p>
+        <p class="profile-help">Create public collections of related intervals. Intervals with no group stay private.</p>
+      </div>
+      <form id="share-group-form" class="profile-form" novalidate>
+        <label for="share-group-name">New group</label>
+        <div class="profile-form-row">
+          <input type="text" id="share-group-name" maxlength="80" placeholder="e.g. Trips" required />
+          <button id="share-group-create" type="submit" class="btn-secondary">Create</button>
+        </div>
+        <p id="share-group-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
+      </form>
+      <div id="share-groups-list" class="share-groups-list"></div>
     </section>
   </main>
 
@@ -110,7 +117,6 @@
     <button id="btn-retry" type="button" class="btn-secondary hidden">Retry</button>
   </section>
 
-  <!-- Modal -->
   <div id="modal-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1">
     <div class="modal">
       <h2 id="modal-title">Add Interval</h2>
@@ -158,13 +164,10 @@
           </span>
         </div>
 
-        <label for="field-visibility">Visibility</label>
-        <select id="field-visibility">
-          <option value="private">Private</option>
-          <option value="public">Public</option>
-        </select>
+        <label for="field-share-group">Share group</label>
+        <select id="field-share-group"></select>
         <p class="form-help">
-          Public intervals appear on your public profile link and can be viewed by anyone with that link. You can rotate the link later from your profile.
+          Private intervals stay visible only in your account. Choosing a share group places this interval on that group's public page.
         </p>
 
         <p id="form-error" class="form-error hidden" role="alert" aria-live="assertive"></p>

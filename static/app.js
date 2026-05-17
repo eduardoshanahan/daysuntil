@@ -1,25 +1,28 @@
 'use strict';
 
 const routePath = window.location.pathname;
-const publicMatch = routePath.match(/^\/p\/([^/]+)$/);
-const publicSlug = publicMatch ? decodeURIComponent(publicMatch[1]).toLowerCase() : '';
-const isPublicView = publicSlug !== '';
+const publicMatch = routePath.match(/^\/g\/([^/]+)$/);
+const publicGroupSlug = publicMatch ? decodeURIComponent(publicMatch[1]).toLowerCase() : '';
+const isPublicView = publicGroupSlug !== '';
 
 const authView = document.getElementById('auth-view');
 const appView = document.getElementById('app-view');
 const list = document.getElementById('interval-list');
 const profilePanel = document.getElementById('profile-panel');
+const shareGroupsPanel = document.getElementById('share-groups-panel');
 const profileForm = document.getElementById('profile-form');
 const profileDisplayName = document.getElementById('profile-display-name');
 const profileSave = document.getElementById('profile-save');
-const profileMakePrivate = document.getElementById('profile-make-private');
-const profileRotateLink = document.getElementById('profile-rotate-link');
 const profileDeleteAccount = document.getElementById('profile-delete-account');
 const profileError = document.getElementById('profile-error');
-const profileLink = document.getElementById('profile-link');
-const publicProfileHeader = document.getElementById('public-profile-header');
-const publicProfileName = document.getElementById('public-profile-name');
-const publicProfileUsername = document.getElementById('public-profile-username');
+const shareGroupForm = document.getElementById('share-group-form');
+const shareGroupName = document.getElementById('share-group-name');
+const shareGroupCreate = document.getElementById('share-group-create');
+const shareGroupError = document.getElementById('share-group-error');
+const shareGroupsList = document.getElementById('share-groups-list');
+const publicGroupHeader = document.getElementById('public-group-header');
+const publicGroupName = document.getElementById('public-group-name');
+const publicGroupOwner = document.getElementById('public-group-owner');
 const overlay = document.getElementById('modal-overlay');
 const form = document.getElementById('interval-form');
 const modalTitle = document.getElementById('modal-title');
@@ -28,7 +31,7 @@ const fieldName = document.getElementById('field-name');
 const fieldStart = document.getElementById('field-start');
 const fieldEnd = document.getElementById('field-end');
 const fieldColor = document.getElementById('field-color');
-const fieldVisibility = document.getElementById('field-visibility');
+const fieldShareGroup = document.getElementById('field-share-group');
 const btnPickStart = document.getElementById('btn-pick-start');
 const btnPickEnd = document.getElementById('btn-pick-end');
 const formError = document.getElementById('form-error');
@@ -67,11 +70,13 @@ const authGithub = document.getElementById('auth-github');
 let isSubmitting = false;
 let isAuthSubmitting = false;
 let isProfileSubmitting = false;
+let isShareGroupSubmitting = false;
 let isRegisterMode = false;
 let activeLoadToken = 0;
 const pendingDeleteIds = new Set();
 let lastFocusedElement = null;
 let currentUser = null;
+let currentShareGroups = [];
 let activeDateField = null;
 let visibleMonth = null;
 
@@ -107,8 +112,6 @@ const api = {
   providers: () => apiFetch('/api/auth/providers'),
   me: () => apiFetch('/api/me'),
   deleteAccount: () => apiFetch('/api/me', { method: 'DELETE' }),
-  makeAllPrivate: () => apiFetch('/api/me/make-private', { method: 'POST' }),
-  rotatePublicLink: () => apiFetch('/api/me/public-link/rotate', { method: 'POST' }),
   updateProfile: data => apiFetch('/api/me/profile', { method: 'PUT', body: JSON.stringify(data) }),
   register: data => apiFetch('/api/register', { method: 'POST', body: JSON.stringify(data) }),
   login: data => apiFetch('/api/login', { method: 'POST', body: JSON.stringify(data) }),
@@ -117,7 +120,12 @@ const api = {
   create: data => apiFetch('/api/intervals', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => apiFetch(`/api/intervals/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: id => apiFetch(`/api/intervals/${id}`, { method: 'DELETE' }),
-  publicProfile: slug => apiFetch(`/api/public/profiles/${encodeURIComponent(slug)}`),
+  listGroups: () => apiFetch('/api/share-groups'),
+  createGroup: data => apiFetch('/api/share-groups', { method: 'POST', body: JSON.stringify(data) }),
+  updateGroup: (id, data) => apiFetch(`/api/share-groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteGroup: id => apiFetch(`/api/share-groups/${id}`, { method: 'DELETE' }),
+  rotateGroup: id => apiFetch(`/api/share-groups/${id}/rotate`, { method: 'POST' }),
+  publicGroup: slug => apiFetch(`/api/public/groups/${encodeURIComponent(slug)}`),
 };
 
 function today() {
@@ -181,14 +189,29 @@ function statusLabel(status, progress) {
 }
 
 function escHtml(str) {
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function renderShareGroupOptions(selectedID = null) {
+  fieldShareGroup.innerHTML = '<option value="">Private</option>';
+  currentShareGroups.forEach(group => {
+    const option = document.createElement('option');
+    option.value = String(group.id);
+    option.textContent = group.name;
+    fieldShareGroup.appendChild(option);
+  });
+  fieldShareGroup.value = selectedID == null ? '' : String(selectedID);
 }
 
 function renderCard(iv, options = {}) {
   const progress = computeProgress(iv);
   const isDeleting = pendingDeleteIds.has(iv.id);
   const showActions = options.showActions === true;
-  const showVisibility = options.showVisibility === true;
+  const showShareBadge = options.showShareBadge !== false;
 
   const card = document.createElement('div');
   card.className = 'card';
@@ -204,9 +227,11 @@ function renderCard(iv, options = {}) {
   const color = iv.color || '#4f8ef7';
   card.style.setProperty('--card-color', color);
 
-  const visibilityBadge = showVisibility
-    ? `<span class="status-badge ${iv.visibility === 'public' ? 'active' : 'upcoming'}">${iv.visibility}</span>`
-    : '';
+  const shareBadge = !showShareBadge
+    ? ''
+    : iv.share_group_name
+      ? `<span class="status-badge share-badge">${escHtml(iv.share_group_name)}</span>`
+      : `<span class="status-badge private-badge">private</span>`;
 
   const actions = showActions
     ? `<div class="card-actions">
@@ -218,7 +243,7 @@ function renderCard(iv, options = {}) {
   card.innerHTML = `
     <div class="card-header">
       <div>
-        <div class="card-name">${escHtml(iv.name)} ${visibilityBadge}<span class="status-badge ${progress.status}">${statusLabel(progress.status, progress)}</span></div>
+        <div class="card-name">${escHtml(iv.name)} ${shareBadge}<span class="status-badge ${progress.status}">${statusLabel(progress.status, progress)}</span></div>
         <div class="card-dates">${formatDate(iv.start_date)} &ndash; ${formatDate(iv.end_date)} <span class="total-days">${progress.total} days</span></div>
       </div>
       ${actions}
@@ -248,21 +273,21 @@ function setCurrentUser(user) {
   btnLogout.classList.toggle('hidden', !isAuthenticated || isPublicView);
   userBadge.classList.toggle('hidden', !isAuthenticated || isPublicView);
   profilePanel.classList.toggle('hidden', !isAuthenticated || isPublicView);
-  publicProfileHeader.classList.toggle('hidden', !isPublicView);
+  shareGroupsPanel.classList.toggle('hidden', !isAuthenticated || isPublicView);
+  publicGroupHeader.classList.toggle('hidden', !isPublicView);
 
   if (isAuthenticated) {
     userBadge.textContent = user.display_name || user.username;
     profileDisplayName.value = user.display_name || user.username;
-    profileLink.href = `${window.location.origin}/p/${user.public_slug}`;
-    profileLink.textContent = profileLink.href;
     authEmail.value = '';
     authUsername.value = '';
     authPassword.value = '';
     clearAuthError();
   } else {
     userBadge.textContent = '';
-    profileLink.removeAttribute('href');
-    profileLink.textContent = '';
+    currentShareGroups = [];
+    renderShareGroupOptions();
+    shareGroupsList.innerHTML = '';
     btnAdd.disabled = false;
     closeModal(true);
   }
@@ -295,7 +320,6 @@ async function loadIntervals(options = {}) {
     if (loadToken !== activeLoadToken) return;
     renderIntervals(intervals, {
       showActions: true,
-      showVisibility: true,
       emptyMessage: 'No intervals yet. Add your first one above.',
     });
     if (!preserveStatus) clearStatus();
@@ -312,21 +336,63 @@ async function loadIntervals(options = {}) {
   }
 }
 
-async function loadPublicProfile() {
-  list.innerHTML = '<p class="empty-msg">Loading public profile...</p>';
+function renderShareGroups() {
+  if (!currentShareGroups.length) {
+    shareGroupsList.innerHTML = '<p class="empty-msg">No share groups yet. Create one to start sharing selected intervals.</p>';
+    return;
+  }
+
+  shareGroupsList.innerHTML = '';
+  currentShareGroups.forEach(group => {
+    const card = document.createElement('div');
+    card.className = 'share-group-card';
+    const publicURL = `${window.location.origin}/g/${group.public_slug}`;
+    card.innerHTML = `
+      <label class="share-group-label" for="share-group-edit-${group.id}">Group name</label>
+      <div class="share-group-edit-row">
+        <input id="share-group-edit-${group.id}" type="text" value="${escHtml(group.name)}" maxlength="80" ${isShareGroupSubmitting ? 'disabled' : ''} />
+        <button type="button" class="btn-secondary btn-group-save" ${isShareGroupSubmitting ? 'disabled' : ''}>Save</button>
+      </div>
+      <p><a class="profile-link" target="_blank" rel="noopener noreferrer" href="${publicURL}">${publicURL}</a></p>
+      <div class="share-group-actions">
+        <button type="button" class="btn-secondary btn-group-rotate" ${isShareGroupSubmitting ? 'disabled' : ''}>Rotate link</button>
+        <button type="button" class="btn-secondary danger btn-group-delete" ${isShareGroupSubmitting ? 'disabled' : ''}>Delete group</button>
+      </div>
+    `;
+
+    const nameInput = card.querySelector(`#share-group-edit-${group.id}`);
+    card.querySelector('.btn-group-save').addEventListener('click', () => saveShareGroup(group.id, nameInput.value.trim()));
+    card.querySelector('.btn-group-rotate').addEventListener('click', () => rotateShareGroup(group));
+    card.querySelector('.btn-group-delete').addEventListener('click', () => removeShareGroup(group));
+    shareGroupsList.appendChild(card);
+  });
+}
+
+async function loadShareGroups() {
+  if (!currentUser) return;
+  const groups = await api.listGroups();
+  currentShareGroups = groups || [];
+  renderShareGroupOptions();
+  renderShareGroups();
+}
+
+async function loadPublicGroup() {
+  list.innerHTML = '<p class="empty-msg">Loading shared group...</p>';
   try {
-    const profile = await api.publicProfile(publicSlug);
-    document.title = `${profile.display_name || profile.username} | Days Until`;
-    publicProfileName.textContent = profile.display_name || profile.username;
-    publicProfileUsername.textContent = `@${profile.username}`;
-    renderIntervals(profile.intervals || [], {
+    const group = await api.publicGroup(publicGroupSlug);
+    document.title = `${group.name} | Days Until`;
+    publicGroupName.textContent = group.name;
+    publicGroupOwner.textContent = group.owner_name
+      ? `Shared by ${group.owner_name}`
+      : `Shared by @${group.owner_username}`;
+    renderIntervals(group.intervals || [], {
       showActions: false,
-      showVisibility: false,
-      emptyMessage: 'No public intervals to show yet.',
+      showShareBadge: false,
+      emptyMessage: 'No shared intervals to show yet.',
     });
     clearStatus();
   } catch (err) {
-    list.innerHTML = `<p class="empty-msg">${err.status === 404 ? 'Public profile not found.' : 'Unable to load public profile.'}</p>`;
+    list.innerHTML = `<p class="empty-msg">${err.status === 404 ? 'Shared group not found.' : 'Unable to load shared group.'}</p>`;
     if (err.status !== 404) {
       showStatus(err.message, { tone: 'error' });
     }
@@ -339,7 +405,7 @@ function openAdd() {
   fieldId.value = '';
   form.reset();
   fieldColor.value = '#4f8ef7';
-  fieldVisibility.value = 'private';
+  renderShareGroupOptions();
   hideError();
   document.body.classList.add('modal-open');
   overlay.classList.remove('hidden');
@@ -354,7 +420,7 @@ function openEdit(iv) {
   fieldStart.value = iv.start_date;
   fieldEnd.value = iv.end_date;
   fieldColor.value = iv.color || '#4f8ef7';
-  fieldVisibility.value = iv.visibility || 'private';
+  renderShareGroupOptions(iv.share_group_id);
   hideError();
   document.body.classList.add('modal-open');
   overlay.classList.remove('hidden');
@@ -389,6 +455,16 @@ function showProfileError(message) {
 function clearProfileError() {
   profileError.textContent = '';
   profileError.classList.add('hidden');
+}
+
+function showShareGroupError(message) {
+  shareGroupError.textContent = message;
+  shareGroupError.classList.remove('hidden');
+}
+
+function clearShareGroupError() {
+  shareGroupError.textContent = '';
+  shareGroupError.classList.add('hidden');
 }
 
 function openDatePicker(field) {
@@ -455,7 +531,7 @@ function setAuthMode(registerMode) {
   authTitle.textContent = registerMode ? 'Create your account' : 'Sign in to your account';
   authSubtitle.textContent = registerMode
     ? 'Use your email to sign in, and choose a separate public username.'
-    : 'Sign in with your email. Your public username stays separate.';
+    : 'Sign in with your email. Share groups stay separate from your account identity.';
   authSubmit.textContent = registerMode ? 'Create account' : 'Log in';
   authSwitchLabel.textContent = registerMode ? 'Already have an account?' : 'Need an account?';
   authSwitch.textContent = registerMode ? 'Log in instead' : 'Create one';
@@ -480,9 +556,15 @@ function setAuthSubmitting(nextValue) {
 function setProfileSubmitting(nextValue) {
   isProfileSubmitting = nextValue;
   profileSave.disabled = nextValue;
-  profileRotateLink.disabled = nextValue;
   profileDeleteAccount.disabled = nextValue;
   profileDisplayName.disabled = nextValue;
+}
+
+function setShareGroupSubmitting(nextValue) {
+  isShareGroupSubmitting = nextValue;
+  shareGroupName.disabled = nextValue;
+  shareGroupCreate.disabled = nextValue;
+  renderShareGroups();
 }
 
 function setSubmitting(nextValue) {
@@ -541,7 +623,7 @@ async function confirmDelete(iv) {
   if (!confirm(`Delete "${iv.name}"?`)) return;
 
   pendingDeleteIds.add(iv.id);
-  await loadIntervals();
+  await loadIntervals({ preserveStatus: true });
   let keepStatus = false;
 
   try {
@@ -562,6 +644,68 @@ async function confirmDelete(iv) {
   }
 }
 
+async function saveShareGroup(id, name) {
+  if (isShareGroupSubmitting) return;
+  if (!name) return showShareGroupError('Group name is required.');
+  clearShareGroupError();
+  try {
+    setShareGroupSubmitting(true);
+    await api.updateGroup(id, { name });
+    await loadShareGroups();
+    await loadIntervals({ preserveStatus: true });
+    showStatus('Share group updated.', { tone: 'status' });
+  } catch (err) {
+    if (err.status === 401) {
+      handleUnauthorized('Your session has ended. Log in again.');
+      return;
+    }
+    showShareGroupError(err.message);
+  } finally {
+    setShareGroupSubmitting(false);
+  }
+}
+
+async function rotateShareGroup(group) {
+  if (isShareGroupSubmitting) return;
+  if (!confirm(`Rotate the public link for "${group.name}"? The current group link will stop working immediately.`)) return;
+  clearShareGroupError();
+  try {
+    setShareGroupSubmitting(true);
+    await api.rotateGroup(group.id);
+    await loadShareGroups();
+    showStatus('Share-group link rotated.', { tone: 'status' });
+  } catch (err) {
+    if (err.status === 401) {
+      handleUnauthorized('Your session has ended. Log in again.');
+      return;
+    }
+    showShareGroupError(err.message);
+  } finally {
+    setShareGroupSubmitting(false);
+  }
+}
+
+async function removeShareGroup(group) {
+  if (isShareGroupSubmitting) return;
+  if (!confirm(`Delete the share group "${group.name}"? Intervals in it will become private.`)) return;
+  clearShareGroupError();
+  try {
+    setShareGroupSubmitting(true);
+    await api.deleteGroup(group.id);
+    await loadShareGroups();
+    await loadIntervals({ preserveStatus: true });
+    showStatus('Share group deleted. Its intervals are private again.', { tone: 'status' });
+  } catch (err) {
+    if (err.status === 401) {
+      handleUnauthorized('Your session has ended. Log in again.');
+      return;
+    }
+    showShareGroupError(err.message);
+  } finally {
+    setShareGroupSubmitting(false);
+  }
+}
+
 btnAdd.addEventListener('click', openAdd);
 btnCancel.addEventListener('click', closeModal);
 btnLogout.addEventListener('click', async () => {
@@ -575,9 +719,11 @@ btnLogout.addEventListener('click', async () => {
 btnRetry.addEventListener('click', () => {
   clearStatus();
   if (isPublicView) {
-    loadPublicProfile();
+    loadPublicGroup();
   } else {
-    loadIntervals();
+    loadShareGroups()
+      .then(() => loadIntervals())
+      .catch(err => showStatus(err.message, { retry: true, tone: 'error' }));
   }
 });
 authSwitch.addEventListener('click', () => {
@@ -638,6 +784,7 @@ authForm.addEventListener('submit', async event => {
     setCurrentUser(user);
     clearStatus();
     list.innerHTML = '<p id="loading-msg" class="empty-msg">Loading intervals...</p>';
+    await loadShareGroups();
     await loadIntervals();
   } catch (err) {
     showAuthError(err.message);
@@ -670,51 +817,34 @@ profileForm.addEventListener('submit', async event => {
   }
 });
 
-profileMakePrivate.addEventListener('click', async () => {
-  if (isProfileSubmitting || !currentUser) return;
-  if (!confirm('Make all of your intervals private? Your public link will stop showing them immediately.')) return;
+shareGroupForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (isShareGroupSubmitting || !currentUser) return;
 
-  clearProfileError();
+  clearShareGroupError();
+  const name = shareGroupName.value.trim();
+  if (!name) return showShareGroupError('Group name is required.');
+
   try {
-    setProfileSubmitting(true);
-    await api.makeAllPrivate();
-    await loadIntervals();
-    showStatus('All intervals are now private.', { tone: 'status' });
+    setShareGroupSubmitting(true);
+    await api.createGroup({ name });
+    shareGroupName.value = '';
+    await loadShareGroups();
+    showStatus('Share group created.', { tone: 'status' });
   } catch (err) {
     if (err.status === 401) {
       handleUnauthorized('Your session has ended. Log in again.');
       return;
     }
-    showProfileError(err.message);
+    showShareGroupError(err.message);
   } finally {
-    setProfileSubmitting(false);
-  }
-});
-
-profileRotateLink.addEventListener('click', async () => {
-  if (isProfileSubmitting || !currentUser) return;
-  if (!confirm('Rotate your public link? The current public link will stop working immediately.')) return;
-
-  clearProfileError();
-  try {
-    setProfileSubmitting(true);
-    const updatedUser = await api.rotatePublicLink();
-    setCurrentUser(updatedUser);
-    showStatus('Public link rotated.', { tone: 'status' });
-  } catch (err) {
-    if (err.status === 401) {
-      handleUnauthorized('Your session has ended. Log in again.');
-      return;
-    }
-    showProfileError(err.message);
-  } finally {
-    setProfileSubmitting(false);
+    setShareGroupSubmitting(false);
   }
 });
 
 profileDeleteAccount.addEventListener('click', async () => {
   if (isProfileSubmitting || !currentUser) return;
-  if (!confirm(`Delete account "${currentUser.username}"? This will permanently remove your intervals and session.`)) return;
+  if (!confirm(`Delete account "${currentUser.username}"? This will permanently remove your intervals, groups, and session.`)) return;
 
   clearProfileError();
   try {
@@ -740,7 +870,7 @@ form.addEventListener('submit', async event => {
   const name = fieldName.value.trim();
   const start = fieldStart.value;
   const end = fieldEnd.value;
-  const visibility = fieldVisibility.value;
+  const shareGroupID = fieldShareGroup.value ? Number(fieldShareGroup.value) : null;
 
   if (!name) return showError('Name is required.');
   if (!start) return showError('Start date is required.');
@@ -749,7 +879,7 @@ form.addEventListener('submit', async event => {
   if (!isValidISODate(end)) return showError('End date must be in YYYY-MM-DD format.');
   if (start >= end) return showError('End date must be after start date.');
 
-  const data = { name, start_date: start, end_date: end, color: fieldColor.value, visibility };
+  const data = { name, start_date: start, end_date: end, color: fieldColor.value, share_group_id: shareGroupID };
 
   try {
     setSubmitting(true);
@@ -800,6 +930,7 @@ async function initPrivateApp() {
   try {
     const user = await api.me();
     setCurrentUser(user);
+    await loadShareGroups();
     await loadIntervals();
   } catch (err) {
     setCurrentUser(null);
@@ -820,12 +951,13 @@ function initPublicView() {
   btnLogout.classList.add('hidden');
   userBadge.classList.add('hidden');
   profilePanel.classList.add('hidden');
-  publicProfileHeader.classList.remove('hidden');
+  shareGroupsPanel.classList.add('hidden');
+  publicGroupHeader.classList.remove('hidden');
   appView.classList.remove('hidden');
   api.version()
     .then(build => setVersionLabel(build.version))
     .catch(() => setVersionLabel('dev'));
-  loadPublicProfile();
+  loadPublicGroup();
 }
 
 if (isPublicView) {

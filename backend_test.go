@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -73,6 +74,16 @@ func decodeUser(t *testing.T, rec *httptest.ResponseRecorder) User {
 	return user
 }
 
+func decodeShareGroup(t *testing.T, rec *httptest.ResponseRecorder) ShareGroup {
+	t.Helper()
+
+	var group ShareGroup
+	if err := json.NewDecoder(rec.Body).Decode(&group); err != nil {
+		t.Fatalf("decode share group: %v", err)
+	}
+	return group
+}
+
 func registerUser(t *testing.T, h http.Handler, email, username, password string) (*http.Cookie, User) {
 	t.Helper()
 
@@ -87,6 +98,16 @@ func registerUser(t *testing.T, h http.Handler, email, username, password string
 	}
 
 	return cookies[0], decodeUser(t, rec)
+}
+
+func createShareGroupForTest(t *testing.T, router http.Handler, cookie *http.Cookie, name string) ShareGroup {
+	t.Helper()
+
+	rec := performRequest(t, router, http.MethodPost, "/api/share-groups", `{"name":"`+name+`"}`, cookie)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create share group: expected 201, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	return decodeShareGroup(t, rec)
 }
 
 func TestInitDBAddsColumnsToLegacySchema(t *testing.T) {
@@ -106,7 +127,7 @@ func TestInitDBAddsColumnsToLegacySchema(t *testing.T) {
 		t.Fatalf("init db: %v", err)
 	}
 
-	for _, column := range []string{"color", "user_id", "visibility"} {
+	for _, column := range []string{"color", "user_id", "visibility", "share_group_id"} {
 		exists, err := intervalColumnExists(db, column)
 		if err != nil {
 			t.Fatalf("check %s column: %v", column, err)
@@ -147,11 +168,16 @@ func TestInitDBAddsEmailColumnToLegacyUsersSchema(t *testing.T) {
 }
 
 func TestValidateIntervalRejectsNonIncreasingDates(t *testing.T) {
-	err := validateInterval(Interval{
+	db := openTestDB(t)
+	if err := initDB(db); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	_, err := validateInterval(Interval{
 		Name:      "Test",
 		StartDate: "2026-05-20",
 		EndDate:   "2026-05-20",
-	})
+	}, db, 1)
 	if err == nil {
 		t.Fatal("expected validation error for equal start and end date")
 	}
@@ -174,9 +200,6 @@ func TestRegisterAdoptsLegacyIntervalsForFirstUser(t *testing.T) {
 	}
 	if user.DisplayName != "alice" {
 		t.Fatalf("expected default display name alice, got %q", user.DisplayName)
-	}
-	if user.PublicSlug == "" {
-		t.Fatal("expected public slug to be generated")
 	}
 
 	rec := performRequest(t, router, http.MethodGet, "/api/intervals", "", cookie)
@@ -277,9 +300,6 @@ func TestLoginAndCurrentUser(t *testing.T) {
 	if user.Username != "alice" {
 		t.Fatalf("expected current user alice, got %q", user.Username)
 	}
-	if user.PublicSlug == "" {
-		t.Fatal("expected current user response to include public slug")
-	}
 }
 
 func TestUsersOnlySeeTheirOwnIntervals(t *testing.T) {
@@ -287,13 +307,14 @@ func TestUsersOnlySeeTheirOwnIntervals(t *testing.T) {
 
 	aliceCookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
 	bobCookie, _ := registerUser(t, router, "bob@example.com", "bob", "password123")
+	bobGroup := createShareGroupForTest(t, router, bobCookie, "Bob Trips")
 
 	createAlice := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 		"name":"Alice Trip",
 		"start_date":"2026-05-20",
 		"end_date":"2026-05-21",
 		"color":"#4f8ef7",
-		"visibility":"private"
+		"share_group_id":null
 	}`, aliceCookie)
 	if createAlice.Code != http.StatusCreated {
 		t.Fatalf("create alice interval: expected 201, got %d (%s)", createAlice.Code, createAlice.Body.String())
@@ -304,7 +325,7 @@ func TestUsersOnlySeeTheirOwnIntervals(t *testing.T) {
 		"start_date":"2026-06-20",
 		"end_date":"2026-06-21",
 		"color":"#e05c5c",
-		"visibility":"public"
+		"share_group_id":`+strconv.FormatInt(bobGroup.ID, 10)+`
 	}`, bobCookie)
 	if createBob.Code != http.StatusCreated {
 		t.Fatalf("create bob interval: expected 201, got %d (%s)", createBob.Code, createBob.Body.String())
@@ -377,22 +398,98 @@ func TestUpdateDisplayName(t *testing.T) {
 	}
 }
 
-func TestPublicProfileOnlyShowsPublicIntervals(t *testing.T) {
+func TestShareGroupsListCreateUpdateRotateAndDelete(t *testing.T) {
 	_, router := newTestServer(t)
 
-	cookie, user := registerUser(t, router, "alice@example.com", "alice", "password123")
+	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	group := createShareGroupForTest(t, router, cookie, "Trips")
+	if group.PublicSlug == "" {
+		t.Fatal("expected public slug for share group")
+	}
+
+	listRec := performRequest(t, router, http.MethodGet, "/api/share-groups", "", cookie)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 listing groups, got %d (%s)", listRec.Code, listRec.Body.String())
+	}
+	var groups []ShareGroup
+	if err := json.NewDecoder(listRec.Body).Decode(&groups); err != nil {
+		t.Fatalf("decode groups: %v", err)
+	}
+	if len(groups) != 1 || groups[0].Name != "Trips" {
+		t.Fatalf("expected created group in list, got %#v", groups)
+	}
+
+	updateRec := performRequest(t, router, http.MethodPut, "/api/share-groups/"+strconv.FormatInt(group.ID, 10), `{"name":"Summer trips"}`, cookie)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 updating group, got %d (%s)", updateRec.Code, updateRec.Body.String())
+	}
+	updatedGroup := decodeShareGroup(t, updateRec)
+	if updatedGroup.Name != "Summer trips" {
+		t.Fatalf("expected renamed group, got %q", updatedGroup.Name)
+	}
+
+	rotateRec := performRequest(t, router, http.MethodPost, "/api/share-groups/"+strconv.FormatInt(group.ID, 10)+"/rotate", "", cookie)
+	if rotateRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 rotating group slug, got %d (%s)", rotateRec.Code, rotateRec.Body.String())
+	}
+	rotatedGroup := decodeShareGroup(t, rotateRec)
+	if rotatedGroup.PublicSlug == "" || rotatedGroup.PublicSlug == group.PublicSlug {
+		t.Fatalf("expected rotated slug, got %q from %q", rotatedGroup.PublicSlug, group.PublicSlug)
+	}
+
+	deleteRec := performRequest(t, router, http.MethodDelete, "/api/share-groups/"+strconv.FormatInt(group.ID, 10), "", cookie)
+	if deleteRec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 deleting group, got %d (%s)", deleteRec.Code, deleteRec.Body.String())
+	}
+}
+
+func TestIntervalsCanBeAssignedToShareGroup(t *testing.T) {
+	_, router := newTestServer(t)
+
+	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	group := createShareGroupForTest(t, router, cookie, "Trips")
+
+	create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
+		"name":"Trip",
+		"start_date":"2026-05-20",
+		"end_date":"2026-05-21",
+		"color":"#4f8ef7",
+		"share_group_id":`+strconv.FormatInt(group.ID, 10)+`
+	}`, cookie)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("expected 201 creating interval, got %d (%s)", create.Code, create.Body.String())
+	}
+
+	var interval Interval
+	if err := json.NewDecoder(create.Body).Decode(&interval); err != nil {
+		t.Fatalf("decode interval: %v", err)
+	}
+	if interval.ShareGroupID == nil || *interval.ShareGroupID != group.ID {
+		t.Fatalf("expected share group assignment, got %#v", interval)
+	}
+	if interval.ShareGroupName != "Trips" {
+		t.Fatalf("expected share group name Trips, got %q", interval.ShareGroupName)
+	}
+}
+
+func TestPublicShareGroupShowsOnlyAssignedIntervals(t *testing.T) {
+	_, router := newTestServer(t)
+
+	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
 
 	updateProfile := performRequest(t, router, http.MethodPut, "/api/me/profile", `{"display_name":"Alice Public"}`, cookie)
 	if updateProfile.Code != http.StatusOK {
 		t.Fatalf("expected 200 updating profile, got %d", updateProfile.Code)
 	}
 
+	group := createShareGroupForTest(t, router, cookie, "Trips")
+
 	privateInterval := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 		"name":"Private Trip",
 		"start_date":"2026-05-20",
 		"end_date":"2026-05-21",
 		"color":"#4f8ef7",
-		"visibility":"private"
+		"share_group_id":null
 	}`, cookie)
 	if privateInterval.Code != http.StatusCreated {
 		t.Fatalf("expected 201 creating private interval, got %d", privateInterval.Code)
@@ -403,49 +500,81 @@ func TestPublicProfileOnlyShowsPublicIntervals(t *testing.T) {
 		"start_date":"2026-06-20",
 		"end_date":"2026-06-21",
 		"color":"#e05c5c",
-		"visibility":"public"
+		"share_group_id":`+strconv.FormatInt(group.ID, 10)+`
 	}`, cookie)
 	if publicInterval.Code != http.StatusCreated {
-		t.Fatalf("expected 201 creating public interval, got %d", publicInterval.Code)
+		t.Fatalf("expected 201 creating grouped interval, got %d", publicInterval.Code)
 	}
 
-	rec := performRequest(t, router, http.MethodGet, "/api/public/profiles/"+user.PublicSlug, "")
+	rec := performRequest(t, router, http.MethodGet, "/api/public/groups/"+group.PublicSlug, "")
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 loading public profile, got %d (%s)", rec.Code, rec.Body.String())
+		t.Fatalf("expected 200 loading public group, got %d (%s)", rec.Code, rec.Body.String())
 	}
 
-	var profile PublicProfile
+	var profile PublicShareGroup
 	if err := json.NewDecoder(rec.Body).Decode(&profile); err != nil {
-		t.Fatalf("decode public profile: %v", err)
+		t.Fatalf("decode public share group: %v", err)
 	}
 
-	if profile.DisplayName != "Alice Public" {
-		t.Fatalf("expected public display name, got %q", profile.DisplayName)
+	if profile.Name != "Trips" {
+		t.Fatalf("expected share group name Trips, got %q", profile.Name)
+	}
+	if profile.OwnerName != "Alice Public" {
+		t.Fatalf("expected public owner display name, got %q", profile.OwnerName)
 	}
 	if len(profile.Intervals) != 1 || profile.Intervals[0].Name != "Public Trip" {
-		t.Fatalf("expected only public interval, got %#v", profile.Intervals)
+		t.Fatalf("expected only grouped interval, got %#v", profile.Intervals)
 	}
 }
 
-func TestPublicProfileReturnsNotFoundWhenUserHasNoPublicIntervals(t *testing.T) {
+func TestPublicShareGroupReturnsNotFoundWhenGroupIsEmpty(t *testing.T) {
 	_, router := newTestServer(t)
 
-	cookie, user := registerUser(t, router, "alice@example.com", "alice", "password123")
+	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	group := createShareGroupForTest(t, router, cookie, "Trips")
 
-	privateInterval := performRequest(t, router, http.MethodPost, "/api/intervals", `{
-		"name":"Private Trip",
+	rec := performRequest(t, router, http.MethodGet, "/api/public/groups/"+group.PublicSlug, "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when group has no intervals, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDeletingShareGroupMakesItsIntervalsPrivate(t *testing.T) {
+	_, router := newTestServer(t)
+
+	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	group := createShareGroupForTest(t, router, cookie, "Trips")
+
+	create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
+		"name":"Trip",
 		"start_date":"2026-05-20",
 		"end_date":"2026-05-21",
 		"color":"#4f8ef7",
-		"visibility":"private"
+		"share_group_id":`+strconv.FormatInt(group.ID, 10)+`
 	}`, cookie)
-	if privateInterval.Code != http.StatusCreated {
-		t.Fatalf("expected 201 creating private interval, got %d (%s)", privateInterval.Code, privateInterval.Body.String())
+	if create.Code != http.StatusCreated {
+		t.Fatalf("expected 201 creating interval, got %d (%s)", create.Code, create.Body.String())
 	}
 
-	rec := performRequest(t, router, http.MethodGet, "/api/public/profiles/"+user.PublicSlug, "")
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 when user has no public intervals, got %d (%s)", rec.Code, rec.Body.String())
+	deleteRec := performRequest(t, router, http.MethodDelete, "/api/share-groups/"+strconv.FormatInt(group.ID, 10), "", cookie)
+	if deleteRec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 deleting group, got %d (%s)", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	rec := performRequest(t, router, http.MethodGet, "/api/intervals", "", cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 listing intervals, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	var intervals []Interval
+	if err := json.NewDecoder(rec.Body).Decode(&intervals); err != nil {
+		t.Fatalf("decode intervals: %v", err)
+	}
+	if len(intervals) != 1 {
+		t.Fatalf("expected 1 interval, got %d", len(intervals))
+	}
+	if intervals[0].ShareGroupID != nil {
+		t.Fatalf("expected interval to become private, got %#v", intervals[0])
 	}
 }
 
@@ -575,116 +704,20 @@ func TestCurrentUserResponseDoesNotExposeEmail(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "\"email\"") {
 		t.Fatalf("expected email field to stay private, got %q", rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "\"public_slug\"") {
-		t.Fatalf("expected public slug in current user response, got %q", rec.Body.String())
-	}
 }
 
-func TestRotatePublicLinkInvalidatesOldSlug(t *testing.T) {
-	_, router := newTestServer(t)
-
-	cookie, user := registerUser(t, router, "alice@example.com", "alice", "password123")
-
-	create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
-		"name":"Trip",
-		"start_date":"2026-05-20",
-		"end_date":"2026-05-21",
-		"color":"#4f8ef7",
-		"visibility":"public"
-	}`, cookie)
-	if create.Code != http.StatusCreated {
-		t.Fatalf("expected 201 creating interval, got %d (%s)", create.Code, create.Body.String())
-	}
-
-	oldPublic := performRequest(t, router, http.MethodGet, "/api/public/profiles/"+user.PublicSlug, "")
-	if oldPublic.Code != http.StatusOK {
-		t.Fatalf("expected 200 for current public slug, got %d (%s)", oldPublic.Code, oldPublic.Body.String())
-	}
-
-	rotate := performRequest(t, router, http.MethodPost, "/api/me/public-link/rotate", "", cookie)
-	if rotate.Code != http.StatusOK {
-		t.Fatalf("expected 200 rotating public link, got %d (%s)", rotate.Code, rotate.Body.String())
-	}
-
-	updatedUser := decodeUser(t, rotate)
-	if updatedUser.PublicSlug == "" {
-		t.Fatal("expected rotated public slug")
-	}
-	if updatedUser.PublicSlug == user.PublicSlug {
-		t.Fatalf("expected a new public slug, got same value %q", updatedUser.PublicSlug)
-	}
-
-	oldAfterRotate := performRequest(t, router, http.MethodGet, "/api/public/profiles/"+user.PublicSlug, "")
-	if oldAfterRotate.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for old public slug, got %d (%s)", oldAfterRotate.Code, oldAfterRotate.Body.String())
-	}
-
-	newAfterRotate := performRequest(t, router, http.MethodGet, "/api/public/profiles/"+updatedUser.PublicSlug, "")
-	if newAfterRotate.Code != http.StatusOK {
-		t.Fatalf("expected 200 for rotated public slug, got %d (%s)", newAfterRotate.Code, newAfterRotate.Body.String())
-	}
-}
-
-func TestMakeAllIntervalsPrivateRemovesPublicProfileContent(t *testing.T) {
-	_, router := newTestServer(t)
-
-	cookie, user := registerUser(t, router, "alice@example.com", "alice", "password123")
-
-	for _, body := range []string{
-		`{"name":"Trip","start_date":"2026-05-20","end_date":"2026-05-21","color":"#4f8ef7","visibility":"public"}`,
-		`{"name":"Birthday","start_date":"2026-06-01","end_date":"2026-06-02","color":"#e05c5c","visibility":"public"}`,
-	} {
-		create := performRequest(t, router, http.MethodPost, "/api/intervals", body, cookie)
-		if create.Code != http.StatusCreated {
-			t.Fatalf("expected 201 creating interval, got %d (%s)", create.Code, create.Body.String())
-		}
-	}
-
-	before := performRequest(t, router, http.MethodGet, "/api/public/profiles/"+user.PublicSlug, "")
-	if before.Code != http.StatusOK {
-		t.Fatalf("expected 200 for current public slug, got %d (%s)", before.Code, before.Body.String())
-	}
-
-	makePrivate := performRequest(t, router, http.MethodPost, "/api/me/make-private", "", cookie)
-	if makePrivate.Code != http.StatusNoContent {
-		t.Fatalf("expected 204 making intervals private, got %d (%s)", makePrivate.Code, makePrivate.Body.String())
-	}
-
-	after := performRequest(t, router, http.MethodGet, "/api/public/profiles/"+user.PublicSlug, "")
-	if after.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for public profile after making intervals private, got %d (%s)", after.Code, after.Body.String())
-	}
-
-	rec := performRequest(t, router, http.MethodGet, "/api/intervals", "", cookie)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 listing intervals, got %d (%s)", rec.Code, rec.Body.String())
-	}
-
-	var intervals []Interval
-	if err := json.NewDecoder(rec.Body).Decode(&intervals); err != nil {
-		t.Fatalf("decode intervals: %v", err)
-	}
-	if len(intervals) != 2 {
-		t.Fatalf("expected 2 intervals, got %d", len(intervals))
-	}
-	for _, iv := range intervals {
-		if iv.Visibility != "private" {
-			t.Fatalf("expected interval %d to be private, got %q", iv.ID, iv.Visibility)
-		}
-	}
-}
-
-func TestDeleteAccountRemovesUserIntervalsAndSession(t *testing.T) {
+func TestDeleteAccountRemovesUserIntervalsGroupsAndSession(t *testing.T) {
 	db, router := newTestServer(t)
 
-	cookie, user := registerUser(t, router, "alice@example.com", "alice", "password123")
+	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	group := createShareGroupForTest(t, router, cookie, "Trips")
 
 	create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 		"name":"Trip",
 		"start_date":"2026-05-20",
 		"end_date":"2026-05-21",
 		"color":"#4f8ef7",
-		"visibility":"public"
+		"share_group_id":`+strconv.FormatInt(group.ID, 10)+`
 	}`, cookie)
 	if create.Code != http.StatusCreated {
 		t.Fatalf("expected 201 creating interval, got %d (%s)", create.Code, create.Body.String())
@@ -700,9 +733,9 @@ func TestDeleteAccountRemovesUserIntervalsAndSession(t *testing.T) {
 		t.Fatalf("expected 401 after account deletion, got %d (%s)", me.Code, me.Body.String())
 	}
 
-	publicProfile := performRequest(t, router, http.MethodGet, "/api/public/profiles/"+user.PublicSlug, "")
-	if publicProfile.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for deleted public profile, got %d (%s)", publicProfile.Code, publicProfile.Body.String())
+	publicGroup := performRequest(t, router, http.MethodGet, "/api/public/groups/"+group.PublicSlug, "")
+	if publicGroup.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for deleted public group, got %d (%s)", publicGroup.Code, publicGroup.Body.String())
 	}
 
 	var userCount int
@@ -719,6 +752,14 @@ func TestDeleteAccountRemovesUserIntervalsAndSession(t *testing.T) {
 	}
 	if intervalCount != 0 {
 		t.Fatalf("expected no intervals after deletion, got %d", intervalCount)
+	}
+
+	var groupCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM share_groups`).Scan(&groupCount); err != nil {
+		t.Fatalf("count share groups: %v", err)
+	}
+	if groupCount != 0 {
+		t.Fatalf("expected no share groups after deletion, got %d", groupCount)
 	}
 
 	var sessionCount int

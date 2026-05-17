@@ -149,6 +149,36 @@ header #btn-add {
   gap: 0.7rem;
 }
 
+.share-groups-list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.share-group-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.9rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.share-group-label {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.share-group-edit-row,
+.share-group-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.7rem;
+}
+
+.share-group-actions {
+  margin-top: 0.8rem;
+}
+
 .profile-danger {
   margin-top: 0.15rem;
 }
@@ -161,7 +191,8 @@ header #btn-add {
 }
 
 .profile-form input,
-.modal select {
+.modal select,
+.share-group-edit-row input {
   width: 100%;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -434,6 +465,8 @@ main {
 .status-badge.upcoming  { background: var(--surface2); color: var(--text-muted); }
 .status-badge.active    { background: var(--accent-dim); color: var(--accent); }
 .status-badge.ended     { background: #2a1a1a; color: var(--danger); }
+.share-badge            { background: rgba(79, 142, 247, 0.18); color: #9ec0ff; }
+.private-badge          { background: rgba(122, 138, 170, 0.18); color: var(--text-muted); }
 
 /* Buttons */
 button { cursor: pointer; font-family: inherit; }
@@ -537,7 +570,8 @@ input:focus-visible {
 .modal input:focus { border-color: var(--accent); }
 .auth-form input:focus { border-color: var(--accent); outline: none; }
 .profile-form input:focus,
-.modal select:focus { border-color: var(--accent); outline: none; }
+.modal select:focus,
+.share-group-edit-row input:focus { border-color: var(--accent); outline: none; }
 
 .date-input-row {
   display: grid;

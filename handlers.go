@@ -18,6 +18,10 @@ type profileUpdate struct {
 	DisplayName string `json:"display_name"`
 }
 
+type shareGroupPayload struct {
+	Name string `json:"name"`
+}
+
 type versionResponse struct {
 	Version string `json:"version"`
 }
@@ -63,10 +67,12 @@ func (h *handler) createInterval(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSONBody(w, r, &iv); err != nil {
 		return
 	}
-	if err := validateInterval(iv); err != nil {
+	groupID, err := validateInterval(iv, h.db, user.ID)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	iv.ShareGroupID = groupID
 	created, err := createInterval(h.db, user.ID, iv)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -92,10 +98,12 @@ func (h *handler) updateInterval(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSONBody(w, r, &iv); err != nil {
 		return
 	}
-	if err := validateInterval(iv); err != nil {
+	groupID, err := validateInterval(iv, h.db, user.ID)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	iv.ShareGroupID = groupID
 	if err := updateInterval(h.db, user.ID, id, iv); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			http.Error(w, err.Error(), http.StatusNotFound)
@@ -104,8 +112,12 @@ func (h *handler) updateInterval(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	iv.ID = id
-	writeJSON(w, iv)
+	updated, err := intervalByID(h.db, user.ID, id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, updated)
 }
 
 func (h *handler) deleteInterval(w http.ResponseWriter, r *http.Request) {
@@ -214,36 +226,123 @@ func (h *handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *handler) makeAllIntervalsPrivate(w http.ResponseWriter, r *http.Request) {
+func (h *handler) listShareGroups(w http.ResponseWriter, r *http.Request) {
 	user, err := authenticatedUser(h.db, r)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	if err := makeAllIntervalsPrivate(h.db, user.ID); err != nil {
+	groups, err := listShareGroups(h.db, user.ID)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if groups == nil {
+		groups = []ShareGroup{}
+	}
+	writeJSON(w, groups)
+}
 
+func (h *handler) createShareGroup(w http.ResponseWriter, r *http.Request) {
+	user, err := authenticatedUser(h.db, r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var payload shareGroupPayload
+	if err := decodeJSONBody(w, r, &payload); err != nil {
+		return
+	}
+
+	group, err := createShareGroup(h.db, user.ID, payload.Name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, group)
+}
+
+func (h *handler) updateShareGroup(w http.ResponseWriter, r *http.Request) {
+	user, err := authenticatedUser(h.db, r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	groupID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	var payload shareGroupPayload
+	if err := decodeJSONBody(w, r, &payload); err != nil {
+		return
+	}
+
+	group, err := updateShareGroup(h.db, user.ID, groupID, payload.Name)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, group)
+}
+
+func (h *handler) deleteShareGroup(w http.ResponseWriter, r *http.Request) {
+	user, err := authenticatedUser(h.db, r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	groupID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	if err := deleteShareGroup(h.db, user.ID, groupID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *handler) rotatePublicLink(w http.ResponseWriter, r *http.Request) {
+func (h *handler) rotateShareGroup(w http.ResponseWriter, r *http.Request) {
 	user, err := authenticatedUser(h.db, r)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	publicSlug, err := rotatePublicSlug(h.db, user.ID)
+	groupID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
 
-	user.PublicSlug = publicSlug
-	writeJSON(w, user)
+	group, err := rotateShareGroupSlug(h.db, user.ID, groupID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, group)
 }
 
 func (h *handler) updateProfile(w http.ResponseWriter, r *http.Request) {
@@ -276,14 +375,14 @@ func (h *handler) authProviders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, authProviders(h.githubOAuth))
 }
 
-func (h *handler) publicProfile(w http.ResponseWriter, r *http.Request) {
-	publicSlug := strings.ToLower(strings.TrimSpace(chi.URLParam(r, "publicSlug")))
-	if publicSlug == "" {
-		http.Error(w, "public slug is required", http.StatusBadRequest)
+func (h *handler) publicShareGroup(w http.ResponseWriter, r *http.Request) {
+	groupSlug := strings.ToLower(strings.TrimSpace(chi.URLParam(r, "groupSlug")))
+	if groupSlug == "" {
+		http.Error(w, "group slug is required", http.StatusBadRequest)
 		return
 	}
 
-	profile, err := publicProfileBySlug(h.db, publicSlug)
+	profile, err := publicShareGroupBySlug(h.db, groupSlug)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			http.Error(w, "not found", http.StatusNotFound)
@@ -362,29 +461,30 @@ func (h *handler) githubOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-func validateInterval(iv Interval) error {
+func validateInterval(iv Interval, db *sql.DB, userID int64) (*int64, error) {
 	name := strings.TrimSpace(iv.Name)
 	if name == "" {
-		return fmt.Errorf("name is required")
+		return nil, fmt.Errorf("name is required")
 	}
 	start, err := parseDate(iv.StartDate)
 	if err != nil {
-		return fmt.Errorf("invalid start_date: %w", err)
+		return nil, fmt.Errorf("invalid start_date: %w", err)
 	}
 	end, err := parseDate(iv.EndDate)
 	if err != nil {
-		return fmt.Errorf("invalid end_date: %w", err)
+		return nil, fmt.Errorf("invalid end_date: %w", err)
 	}
 	if !end.After(start) {
-		return fmt.Errorf("end_date must be after start_date")
+		return nil, fmt.Errorf("end_date must be after start_date")
 	}
-	if iv.Visibility == "" {
-		iv.Visibility = "private"
+	groupID, err := shareGroupOwnedByUser(db, userID, iv.ShareGroupID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, fmt.Errorf("share group not found")
+		}
+		return nil, err
 	}
-	if iv.Visibility != "private" && iv.Visibility != "public" {
-		return fmt.Errorf("visibility must be private or public")
-	}
-	return nil
+	return groupID, nil
 }
 
 func validateDisplayName(displayName string) (string, error) {
@@ -422,7 +522,7 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
 	return nil
 }
 
-func servePublicProfileApp(w http.ResponseWriter, r *http.Request) {
+func servePublicGroupApp(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 	http.ServeFile(w, r, "static/index.html")
 }

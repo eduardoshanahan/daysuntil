@@ -12,7 +12,7 @@ The main originally identified issues around cookie security, auth abuse, and ba
 
 The main remaining risk in the current code is:
 
-1. intentional exposure of public intervals when a user chooses public visibility
+1. intentional exposure of intervals included in a public share group
 
 ## Fixed During This Review
 
@@ -67,9 +67,9 @@ Status: Fixed
 
 What changed:
 
-- public profile lookup now returns `404` unless the user has at least one public interval
-- public sharing now uses a generated `public_slug` instead of exposing the username in the route
-- this removes the side channel where an account could be confirmed even when it had nothing public to show
+- account-wide public sharing was retired
+- public sharing now resolves through share groups with generated slugs
+- empty groups return `404`, so there is no longer an account-wide public profile lookup side channel
 
 Files:
 
@@ -127,7 +127,7 @@ Files:
 
 ## Remaining Findings
 
-### 1. Public profile exposure is still intentional for public intervals
+### 1. Public share-group exposure is still intentional
 
 Severity: Low to Medium
 
@@ -138,13 +138,13 @@ Relevant files:
 
 Problem:
 
-- public intervals are intentionally exposed through `/p/{public_slug}` and `/api/public/profiles/{public_slug}`
-- once a user marks an interval public, anyone who knows the public slug can fetch that public data
+- intervals assigned to a share group are intentionally exposed through `/g/{group_slug}` and `/api/public/groups/{groupSlug}`
+- anyone who knows a share-group slug can fetch the intervals assigned to that group
 
 Impact:
 
-- privacy still depends on correct user understanding of public visibility
-- public sharing remains guessable if a public slug is disclosed, even though it is better protected than a username-based route
+- privacy still depends on correct user understanding of group-based sharing
+- public sharing remains readable rather than secret if a share-group slug is disclosed
 
 Suggested fix direction:
 

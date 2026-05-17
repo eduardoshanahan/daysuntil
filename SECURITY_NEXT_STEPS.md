@@ -14,29 +14,33 @@ The application has already addressed:
 - normalized login failures for local and OAuth-backed accounts
 - removal of basic public-profile enumeration by username
 - explicit HTTP server timeouts
-- human-readable public sharing slugs instead of username-based public URLs
-- public link rotation
+- human-readable share-group slugs instead of username-based public URLs
+- share-group link rotation
 - browser-side hardening headers and no-store API responses
 - authenticated self-service account deletion
-- account-level "make all intervals private" control
+- share-group-based public sharing with per-interval assignment
 
 ## Remaining items
 
-### 1. Decide whether public sharing should stay account-wide
+### 1. Review the share-group privacy model
 
 Priority: Medium
 
 Why:
 
-- one public slug still exposes all intervals marked `public`
-- the new account-level "make all private" control helps with revocation, but it does not support selective sharing
-- some users may want to share one interval without sharing every public interval on the account
+- a share group is intentionally public to anyone with its slug
+- the current design allows one interval to belong to zero or one group
+- future needs might include expiring links, many-to-many sharing, or stronger secrecy
 
-Possible directions:
+Current status:
 
-- keep the current model and document it clearly
-- move to per-interval share links
-- support both profile-wide and per-interval sharing
+- the share-group model is implemented
+- the design decision remains documented in `SHARE_GROUPS_DECISION.md`
+
+Remaining scope:
+
+- decide whether the current one-group-per-interval model is enough
+- decide whether public share links need stronger entropy or expiry later
 
 ### 2. Logging review
 
@@ -87,10 +91,10 @@ Possible future direction:
 
 The best next security improvement is:
 
-1. decide whether to keep account-wide public sharing or move to per-interval sharing
+1. review whether the current share-group model needs stronger privacy features
 
 Reason:
 
-- it is now the main remaining privacy tradeoff in the product
-- it affects both the backend model and the user experience
-- the smaller hardening items are mostly operational follow-up rather than core product risk
+- the account-wide sharing risk has been removed
+- the remaining privacy tradeoff now sits inside the share-group model itself
+- future hardening here is optional product design, not a clear vulnerability
