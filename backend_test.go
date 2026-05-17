@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -25,19 +26,31 @@ func openTestDB(t *testing.T) *sql.DB {
 
 func newTestServer(t *testing.T) (*sql.DB, http.Handler) {
 	t.Helper()
+	return newTestServerWithHandler(t, &handler{authLimiter: newAuthRateLimiter()})
+}
+
+func newTestServerWithHandler(t *testing.T, h *handler) (*sql.DB, http.Handler) {
+	t.Helper()
 
 	db := openTestDB(t)
 	if err := initDB(db); err != nil {
 		t.Fatalf("init db: %v", err)
 	}
 
-	return db, newRouter(&handler{db: db})
+	h.db = db
+	return db, newRouter(h)
 }
 
 func performRequest(t *testing.T, h http.Handler, method, path, body string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
 	t.Helper()
+	return performRequestFromRemoteAddr(t, h, method, path, body, "192.0.2.1:1234", cookies...)
+}
+
+func performRequestFromRemoteAddr(t *testing.T, h http.Handler, method, path, body, remoteAddr string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
 
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.RemoteAddr = remoteAddr
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -337,5 +350,83 @@ func TestPublicProfileOnlyShowsPublicIntervals(t *testing.T) {
 	}
 	if len(profile.Intervals) != 1 || profile.Intervals[0].Name != "Public Trip" {
 		t.Fatalf("expected only public interval, got %#v", profile.Intervals)
+	}
+}
+
+func TestLoginRateLimitReturnsTooManyRequests(t *testing.T) {
+	limiter := newAuthRateLimiter()
+	limiter.now = func() time.Time {
+		return time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	}
+	limiter.policies[authActionLogin] = authRatePolicy{limit: 2, window: time.Minute}
+
+	_, router := newTestServerWithHandler(t, &handler{authLimiter: limiter})
+	registerUser(t, router, "alice", "password123")
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		rec := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/login", `{"username":"alice","password":"wrongpass"}`, "198.51.100.10:4567")
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: expected 401, got %d (%s)", attempt, rec.Code, rec.Body.String())
+		}
+	}
+
+	blocked := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/login", `{"username":"alice","password":"wrongpass"}`, "198.51.100.10:4567")
+	if blocked.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 after limit, got %d (%s)", blocked.Code, blocked.Body.String())
+	}
+	if blocked.Header().Get("Retry-After") == "" {
+		t.Fatal("expected Retry-After header on rate-limited login")
+	}
+}
+
+func TestRegisterRateLimitReturnsTooManyRequests(t *testing.T) {
+	limiter := newAuthRateLimiter()
+	limiter.now = func() time.Time {
+		return time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	}
+	limiter.policies[authActionRegister] = authRatePolicy{limit: 2, window: time.Minute}
+
+	_, router := newTestServerWithHandler(t, &handler{authLimiter: limiter})
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		rec := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/register", `{"username":"user`+string(rune('0'+attempt))+`","password":"password123"}`, "203.0.113.22:8080")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("attempt %d: expected 200, got %d (%s)", attempt, rec.Code, rec.Body.String())
+		}
+	}
+
+	blocked := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/register", `{"username":"user3","password":"password123"}`, "203.0.113.22:8080")
+	if blocked.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 after limit, got %d (%s)", blocked.Code, blocked.Body.String())
+	}
+	if blocked.Header().Get("Retry-After") == "" {
+		t.Fatal("expected Retry-After header on rate-limited registration")
+	}
+}
+
+func TestLoginAndRegisterRateLimitsAreIndependent(t *testing.T) {
+	limiter := newAuthRateLimiter()
+	limiter.now = func() time.Time {
+		return time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	}
+	limiter.policies[authActionLogin] = authRatePolicy{limit: 1, window: time.Minute}
+	limiter.policies[authActionRegister] = authRatePolicy{limit: 2, window: time.Minute}
+
+	_, router := newTestServerWithHandler(t, &handler{authLimiter: limiter})
+	registerUser(t, router, "alice", "password123")
+
+	firstLogin := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/login", `{"username":"alice","password":"wrongpass"}`, "198.51.100.30:9999")
+	if firstLogin.Code != http.StatusUnauthorized {
+		t.Fatalf("expected first login attempt to pass through, got %d", firstLogin.Code)
+	}
+
+	secondLogin := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/login", `{"username":"alice","password":"wrongpass"}`, "198.51.100.30:9999")
+	if secondLogin.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected second login attempt to be rate-limited, got %d", secondLogin.Code)
+	}
+
+	registerAttempt := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/register", `{"username":"bob","password":"password123"}`, "198.51.100.30:9999")
+	if registerAttempt.Code != http.StatusOK {
+		t.Fatalf("expected register limit to remain independent, got %d (%s)", registerAttempt.Code, registerAttempt.Body.String())
 	}
 }

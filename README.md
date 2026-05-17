@@ -6,6 +6,7 @@ A small homelab web application to track named time intervals. For each interval
 
 - Local username/password accounts
 - Optional GitHub OAuth alongside local login
+- Basic in-memory rate limiting on login and registration endpoints
 - Add, edit, and delete named intervals (start date → end date)
 - Progress bar showing current position within the interval
 - Per-interval accent color with a color picker and presets
@@ -33,7 +34,7 @@ The Compose file forwards these runtime variables into the app:
 - `GITHUB_CALLBACK_URL`: optional explicit OAuth callback URL. If unset, the app derives it from `BASE_URL` as `/api/oauth/github/callback`
 - `GITHUB_CLIENT_ID`: GitHub OAuth App client ID
 - `GITHUB_CLIENT_SECRET`: GitHub OAuth App client secret
-- `COOKIE_SECURE`: set to `true` when the site is served over HTTPS
+- `COOKIE_SECURE`: optional override for cookie security. Leave unset for auto mode. In auto mode, cookies become secure when `BASE_URL` or `GITHUB_CALLBACK_URL` uses `https://`
 
 GitHub login is enabled only when these are set:
 
@@ -45,7 +46,6 @@ Example:
 
 ```bash
 export BASE_URL=https://eduardoshanahan.com
-export COOKIE_SECURE=true
 export GITHUB_CLIENT_ID=your_github_oauth_app_client_id
 export GITHUB_CLIENT_SECRET=your_github_oauth_app_client_secret
 docker compose up --build -d
@@ -71,6 +71,20 @@ Recommended approaches:
 - use SOPS or an equivalent encrypted secret workflow in your private infrastructure repo
 
 The app reads the secret only from environment variables at runtime.
+
+### Cookie security behavior
+
+By default, cookie security runs in auto mode:
+
+- if `BASE_URL` uses `https://`, cookies are marked `Secure`
+- if `GITHUB_CALLBACK_URL` uses `https://`, cookies are marked `Secure`
+- if neither is set to HTTPS, cookies are not marked `Secure`
+
+This keeps local `http://localhost` development working without extra configuration, while making HTTPS deployments safe by default.
+
+If you explicitly set `COOKIE_SECURE=false` together with an HTTPS `BASE_URL` or `GITHUB_CALLBACK_URL`, the app will refuse to start.
+
+Use `COOKIE_SECURE=true` only if you want to force secure cookies even outside auto-detected HTTPS mode.
 
 ## Development
 

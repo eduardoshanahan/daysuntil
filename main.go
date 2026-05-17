@@ -17,6 +17,12 @@ func main() {
 		dbPath = "daysuntil.db"
 	}
 
+	githubOAuth := githubConfigFromEnv()
+	cookieSecure, err := cookieSecureFromEnv(githubOAuth)
+	if err != nil {
+		log.Fatalf("cookie security config: %v", err)
+	}
+
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		log.Fatalf("open db: %v", err)
@@ -29,9 +35,10 @@ func main() {
 
 	h := &handler{
 		db:           db,
-		cookieSecure: os.Getenv("COOKIE_SECURE") == "true",
-		githubOAuth:  githubConfigFromEnv(),
+		cookieSecure: cookieSecure,
+		githubOAuth:  githubOAuth,
 		httpClient:   http.DefaultClient,
+		authLimiter:  newAuthRateLimiter(),
 	}
 
 	r := newRouter(h)
@@ -50,8 +57,8 @@ func newRouter(h *handler) http.Handler {
 	r.Use(middleware.Recoverer)
 
 	r.Get("/api/version", h.appVersion)
-	r.Post("/api/register", h.register)
-	r.Post("/api/login", h.login)
+	r.With(authRateLimitMiddleware(h.authLimiter, authActionRegister)).Post("/api/register", h.register)
+	r.With(authRateLimitMiddleware(h.authLimiter, authActionLogin)).Post("/api/login", h.login)
 	r.Post("/api/logout", h.logout)
 	r.Get("/api/me", h.currentUser)
 	r.Put("/api/me/profile", h.updateProfile)

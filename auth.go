@@ -260,6 +260,38 @@ func (c githubOAuthConfig) Enabled() bool {
 	return c.ClientID != "" && c.ClientSecret != "" && c.CallbackURL != ""
 }
 
+func cookieSecureFromEnv(config githubOAuthConfig) (bool, error) {
+	configuredValue := strings.TrimSpace(os.Getenv("COOKIE_SECURE"))
+	httpsDeployment := urlUsesHTTPS(os.Getenv("BASE_URL")) || urlUsesHTTPS(config.CallbackURL)
+
+	switch configuredValue {
+	case "":
+		return httpsDeployment, nil
+	case "true":
+		return true, nil
+	case "false":
+		if httpsDeployment {
+			return false, fmt.Errorf("COOKIE_SECURE=false is not allowed when BASE_URL or GITHUB_CALLBACK_URL uses https")
+		}
+		return false, nil
+	default:
+		return false, fmt.Errorf("COOKIE_SECURE must be true, false, or unset")
+	}
+}
+
+func urlUsesHTTPS(rawURL string) bool {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return false
+	}
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Scheme, "https")
+}
+
 func findUserByProvider(db *sql.DB, provider, providerUserID string) (User, error) {
 	var user User
 	err := db.QueryRow(

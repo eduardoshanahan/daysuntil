@@ -27,6 +27,7 @@ type handler struct {
 	cookieSecure bool
 	githubOAuth  githubOAuthConfig
 	httpClient   *http.Client
+	authLimiter  *authRateLimiter
 }
 
 func (h *handler) appVersion(w http.ResponseWriter, r *http.Request) {
