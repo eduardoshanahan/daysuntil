@@ -63,17 +63,22 @@ func newRouter(h *handler) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(securityHeadersMiddleware)
 
-	r.Get("/api/version", h.appVersion)
-	r.With(authRateLimitMiddleware(h.authLimiter, authActionRegister)).Post("/api/register", h.register)
-	r.With(authRateLimitMiddleware(h.authLimiter, authActionLogin)).Post("/api/login", h.login)
-	r.Post("/api/logout", h.logout)
-	r.Get("/api/me", h.currentUser)
-	r.Delete("/api/me", h.deleteAccount)
-	r.Post("/api/me/public-link/rotate", h.rotatePublicLink)
-	r.Put("/api/me/profile", h.updateProfile)
-	r.Get("/api/auth/providers", h.authProviders)
-	r.Get("/api/public/profiles/{publicSlug}", h.publicProfile)
+	r.Route("/api", func(r chi.Router) {
+		r.Use(noStoreMiddleware)
+
+		r.Get("/version", h.appVersion)
+		r.With(authRateLimitMiddleware(h.authLimiter, authActionRegister)).Post("/register", h.register)
+		r.With(authRateLimitMiddleware(h.authLimiter, authActionLogin)).Post("/login", h.login)
+		r.Post("/logout", h.logout)
+		r.Get("/me", h.currentUser)
+		r.Delete("/me", h.deleteAccount)
+		r.Post("/me/public-link/rotate", h.rotatePublicLink)
+		r.Put("/me/profile", h.updateProfile)
+		r.Get("/auth/providers", h.authProviders)
+		r.Get("/public/profiles/{publicSlug}", h.publicProfile)
+	})
 	r.Get("/api/oauth/github/start", h.githubOAuthStart)
 	r.Get("/api/oauth/github/callback", h.githubOAuthCallback)
 	r.Get("/p/{publicSlug}", servePublicProfileApp)
@@ -99,4 +104,22 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 		WriteTimeout:      writeTimeout,
 		IdleTimeout:       idleTimeout,
 	}
+}
+
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func noStoreMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Pragma", "no-cache")
+		next.ServeHTTP(w, r)
+	})
 }

@@ -219,6 +219,45 @@ func TestVersionEndpoint(t *testing.T) {
 	}
 }
 
+func TestStaticResponsesIncludeSecurityHeaders(t *testing.T) {
+	_, router := newTestServer(t)
+
+	rec := performRequest(t, router, http.MethodGet, "/", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Content-Security-Policy") == "" {
+		t.Fatal("expected Content-Security-Policy header")
+	}
+	if rec.Header().Get("Referrer-Policy") == "" {
+		t.Fatal("expected Referrer-Policy header")
+	}
+	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("expected nosniff header, got %q", rec.Header().Get("X-Content-Type-Options"))
+	}
+	if rec.Header().Get("X-Frame-Options") != "DENY" {
+		t.Fatalf("expected X-Frame-Options DENY, got %q", rec.Header().Get("X-Frame-Options"))
+	}
+}
+
+func TestAPIResponsesDisableCaching(t *testing.T) {
+	_, router := newTestServer(t)
+
+	rec := performRequest(t, router, http.MethodGet, "/api/version", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("expected Cache-Control no-store, got %q", rec.Header().Get("Cache-Control"))
+	}
+	if rec.Header().Get("Pragma") != "no-cache" {
+		t.Fatalf("expected Pragma no-cache, got %q", rec.Header().Get("Pragma"))
+	}
+	if rec.Header().Get("Content-Security-Policy") == "" {
+		t.Fatal("expected Content-Security-Policy header on API response")
+	}
+}
+
 func TestLoginAndCurrentUser(t *testing.T) {
 	_, router := newTestServer(t)
 
