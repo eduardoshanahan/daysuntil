@@ -28,13 +28,26 @@ func ensurePublicSlug(db *sql.DB, userID int64, currentSlug string) (string, err
 		return currentSlug, nil
 	}
 
+	return assignPublicSlug(db, userID, true)
+}
+
+func rotatePublicSlug(db *sql.DB, userID int64) (string, error) {
+	return assignPublicSlug(db, userID, false)
+}
+
+func assignPublicSlug(db *sql.DB, userID int64, onlyIfBlank bool) (string, error) {
+	condition := ""
+	if onlyIfBlank {
+		condition = " AND public_slug=''"
+	}
+
 	for attempt := 0; attempt < 20; attempt++ {
 		slug, err := randomPublicSlug()
 		if err != nil {
 			return "", err
 		}
 
-		res, err := db.Exec(`UPDATE users SET public_slug=? WHERE id=? AND public_slug=''`, slug, userID)
+		res, err := db.Exec(`UPDATE users SET public_slug=? WHERE id=?`+condition, slug, userID)
 		if err != nil {
 			errText := strings.ToLower(err.Error())
 			if strings.Contains(errText, "unique") {

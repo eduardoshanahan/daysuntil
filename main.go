@@ -70,6 +70,7 @@ func newRouter(h *handler) http.Handler {
 	r.Post("/api/logout", h.logout)
 	r.Get("/api/me", h.currentUser)
 	r.Delete("/api/me", h.deleteAccount)
+	r.Post("/api/me/public-link/rotate", h.rotatePublicLink)
 	r.Put("/api/me/profile", h.updateProfile)
 	r.Get("/api/auth/providers", h.authProviders)
 	r.Get("/api/public/profiles/{publicSlug}", h.publicProfile)

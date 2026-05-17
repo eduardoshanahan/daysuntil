@@ -214,6 +214,23 @@ func (h *handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *handler) rotatePublicLink(w http.ResponseWriter, r *http.Request) {
+	user, err := authenticatedUser(h.db, r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	publicSlug, err := rotatePublicSlug(h.db, user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	user.PublicSlug = publicSlug
+	writeJSON(w, user)
+}
+
 func (h *handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	user, err := authenticatedUser(h.db, r)
 	if err != nil {

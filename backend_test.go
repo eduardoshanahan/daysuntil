@@ -541,6 +541,51 @@ func TestCurrentUserResponseDoesNotExposeEmail(t *testing.T) {
 	}
 }
 
+func TestRotatePublicLinkInvalidatesOldSlug(t *testing.T) {
+	_, router := newTestServer(t)
+
+	cookie, user := registerUser(t, router, "alice@example.com", "alice", "password123")
+
+	create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
+		"name":"Trip",
+		"start_date":"2026-05-20",
+		"end_date":"2026-05-21",
+		"color":"#4f8ef7",
+		"visibility":"public"
+	}`, cookie)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("expected 201 creating interval, got %d (%s)", create.Code, create.Body.String())
+	}
+
+	oldPublic := performRequest(t, router, http.MethodGet, "/api/public/profiles/"+user.PublicSlug, "")
+	if oldPublic.Code != http.StatusOK {
+		t.Fatalf("expected 200 for current public slug, got %d (%s)", oldPublic.Code, oldPublic.Body.String())
+	}
+
+	rotate := performRequest(t, router, http.MethodPost, "/api/me/public-link/rotate", "", cookie)
+	if rotate.Code != http.StatusOK {
+		t.Fatalf("expected 200 rotating public link, got %d (%s)", rotate.Code, rotate.Body.String())
+	}
+
+	updatedUser := decodeUser(t, rotate)
+	if updatedUser.PublicSlug == "" {
+		t.Fatal("expected rotated public slug")
+	}
+	if updatedUser.PublicSlug == user.PublicSlug {
+		t.Fatalf("expected a new public slug, got same value %q", updatedUser.PublicSlug)
+	}
+
+	oldAfterRotate := performRequest(t, router, http.MethodGet, "/api/public/profiles/"+user.PublicSlug, "")
+	if oldAfterRotate.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for old public slug, got %d (%s)", oldAfterRotate.Code, oldAfterRotate.Body.String())
+	}
+
+	newAfterRotate := performRequest(t, router, http.MethodGet, "/api/public/profiles/"+updatedUser.PublicSlug, "")
+	if newAfterRotate.Code != http.StatusOK {
+		t.Fatalf("expected 200 for rotated public slug, got %d (%s)", newAfterRotate.Code, newAfterRotate.Body.String())
+	}
+}
+
 func TestDeleteAccountRemovesUserIntervalsAndSession(t *testing.T) {
 	db, router := newTestServer(t)
 

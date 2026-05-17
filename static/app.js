@@ -12,6 +12,7 @@ const profilePanel = document.getElementById('profile-panel');
 const profileForm = document.getElementById('profile-form');
 const profileDisplayName = document.getElementById('profile-display-name');
 const profileSave = document.getElementById('profile-save');
+const profileRotateLink = document.getElementById('profile-rotate-link');
 const profileDeleteAccount = document.getElementById('profile-delete-account');
 const profileError = document.getElementById('profile-error');
 const profileLink = document.getElementById('profile-link');
@@ -105,6 +106,7 @@ const api = {
   providers: () => apiFetch('/api/auth/providers'),
   me: () => apiFetch('/api/me'),
   deleteAccount: () => apiFetch('/api/me', { method: 'DELETE' }),
+  rotatePublicLink: () => apiFetch('/api/me/public-link/rotate', { method: 'POST' }),
   updateProfile: data => apiFetch('/api/me/profile', { method: 'PUT', body: JSON.stringify(data) }),
   register: data => apiFetch('/api/register', { method: 'POST', body: JSON.stringify(data) }),
   login: data => apiFetch('/api/login', { method: 'POST', body: JSON.stringify(data) }),
@@ -476,6 +478,7 @@ function setAuthSubmitting(nextValue) {
 function setProfileSubmitting(nextValue) {
   isProfileSubmitting = nextValue;
   profileSave.disabled = nextValue;
+  profileRotateLink.disabled = nextValue;
   profileDeleteAccount.disabled = nextValue;
   profileDisplayName.disabled = nextValue;
 }
@@ -654,6 +657,27 @@ profileForm.addEventListener('submit', async event => {
     const updatedUser = await api.updateProfile({ display_name: displayName });
     setCurrentUser(updatedUser);
     showStatus('Display name updated.', { tone: 'status' });
+  } catch (err) {
+    if (err.status === 401) {
+      handleUnauthorized('Your session has ended. Log in again.');
+      return;
+    }
+    showProfileError(err.message);
+  } finally {
+    setProfileSubmitting(false);
+  }
+});
+
+profileRotateLink.addEventListener('click', async () => {
+  if (isProfileSubmitting || !currentUser) return;
+  if (!confirm('Rotate your public link? The current public link will stop working immediately.')) return;
+
+  clearProfileError();
+  try {
+    setProfileSubmitting(true);
+    const updatedUser = await api.rotatePublicLink();
+    setCurrentUser(updatedUser);
+    showStatus('Public link rotated.', { tone: 'status' });
   } catch (err) {
     if (err.status === 401) {
       handleUnauthorized('Your session has ended. Log in again.');
