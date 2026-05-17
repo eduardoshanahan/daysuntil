@@ -81,6 +81,9 @@
       <div>
         <p class="profile-kicker">Public profile</p>
         <p><a id="profile-link" class="profile-link" target="_blank" rel="noopener noreferrer"></a></p>
+        <p class="profile-help">
+          Public intervals stay visible on this link until you make them private again or rotate the link.
+        </p>
       </div>
       <form id="profile-form" class="profile-form" novalidate>
         <label for="profile-display-name">Display name</label>
@@ -90,6 +93,9 @@
         </div>
         <p id="profile-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
       </form>
+      <div class="profile-form-row">
+        <button id="profile-make-private" type="button" class="btn-secondary">Make all intervals private</button>
+      </div>
       <div class="profile-form-row">
         <button id="profile-rotate-link" type="button" class="btn-secondary">Rotate public link</button>
       </div>
@@ -157,6 +163,9 @@
           <option value="private">Private</option>
           <option value="public">Public</option>
         </select>
+        <p class="form-help">
+          Public intervals appear on your public profile link and can be viewed by anyone with that link. You can rotate the link later from your profile.
+        </p>
 
         <p id="form-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
 

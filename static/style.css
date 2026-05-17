@@ -124,6 +124,13 @@ header #btn-add {
   word-break: break-all;
 }
 
+.profile-help {
+  margin-top: 0.45rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
 .public-profile-header h2 {
   font-size: 1.5rem;
   letter-spacing: -0.03em;
@@ -144,6 +151,13 @@ header #btn-add {
 
 .profile-danger {
   margin-top: 0.15rem;
+}
+
+.form-help {
+  margin-top: 0.45rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
 }
 
 .profile-form input,

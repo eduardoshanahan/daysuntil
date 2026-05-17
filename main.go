@@ -74,6 +74,7 @@ func newRouter(h *handler) http.Handler {
 		r.Post("/logout", h.logout)
 		r.Get("/me", h.currentUser)
 		r.Delete("/me", h.deleteAccount)
+		r.Post("/me/make-private", h.makeAllIntervalsPrivate)
 		r.Post("/me/public-link/rotate", h.rotatePublicLink)
 		r.Put("/me/profile", h.updateProfile)
 		r.Get("/auth/providers", h.authProviders)

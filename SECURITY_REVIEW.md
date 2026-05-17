@@ -156,6 +156,7 @@ Suggested fix direction:
 - the frontend escapes interval names before injecting them into HTML
 - SQL queries use parameterized placeholders for user-controlled values
 - the local database file is ignored by git and is not tracked in the repository
+- logging guidance for future auth/account work is documented in `SECURITY_LOGGING.md`
 
 ## Verification
 

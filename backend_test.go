@@ -625,6 +625,55 @@ func TestRotatePublicLinkInvalidatesOldSlug(t *testing.T) {
 	}
 }
 
+func TestMakeAllIntervalsPrivateRemovesPublicProfileContent(t *testing.T) {
+	_, router := newTestServer(t)
+
+	cookie, user := registerUser(t, router, "alice@example.com", "alice", "password123")
+
+	for _, body := range []string{
+		`{"name":"Trip","start_date":"2026-05-20","end_date":"2026-05-21","color":"#4f8ef7","visibility":"public"}`,
+		`{"name":"Birthday","start_date":"2026-06-01","end_date":"2026-06-02","color":"#e05c5c","visibility":"public"}`,
+	} {
+		create := performRequest(t, router, http.MethodPost, "/api/intervals", body, cookie)
+		if create.Code != http.StatusCreated {
+			t.Fatalf("expected 201 creating interval, got %d (%s)", create.Code, create.Body.String())
+		}
+	}
+
+	before := performRequest(t, router, http.MethodGet, "/api/public/profiles/"+user.PublicSlug, "")
+	if before.Code != http.StatusOK {
+		t.Fatalf("expected 200 for current public slug, got %d (%s)", before.Code, before.Body.String())
+	}
+
+	makePrivate := performRequest(t, router, http.MethodPost, "/api/me/make-private", "", cookie)
+	if makePrivate.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 making intervals private, got %d (%s)", makePrivate.Code, makePrivate.Body.String())
+	}
+
+	after := performRequest(t, router, http.MethodGet, "/api/public/profiles/"+user.PublicSlug, "")
+	if after.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for public profile after making intervals private, got %d (%s)", after.Code, after.Body.String())
+	}
+
+	rec := performRequest(t, router, http.MethodGet, "/api/intervals", "", cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 listing intervals, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	var intervals []Interval
+	if err := json.NewDecoder(rec.Body).Decode(&intervals); err != nil {
+		t.Fatalf("decode intervals: %v", err)
+	}
+	if len(intervals) != 2 {
+		t.Fatalf("expected 2 intervals, got %d", len(intervals))
+	}
+	for _, iv := range intervals {
+		if iv.Visibility != "private" {
+			t.Fatalf("expected interval %d to be private, got %q", iv.ID, iv.Visibility)
+		}
+	}
+}
+
 func TestDeleteAccountRemovesUserIntervalsAndSession(t *testing.T) {
 	db, router := newTestServer(t)
 

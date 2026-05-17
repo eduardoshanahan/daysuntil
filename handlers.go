@@ -214,6 +214,21 @@ func (h *handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *handler) makeAllIntervalsPrivate(w http.ResponseWriter, r *http.Request) {
+	user, err := authenticatedUser(h.db, r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if err := makeAllIntervalsPrivate(h.db, user.ID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *handler) rotatePublicLink(w http.ResponseWriter, r *http.Request) {
 	user, err := authenticatedUser(h.db, r)
 	if err != nil {

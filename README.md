@@ -147,6 +147,22 @@ nix develop -c go build ./...
 nix develop -c node --check static/app.js
 ```
 
+### Logging rules
+
+Keep logs free of sensitive auth and account data.
+
+Do not log:
+
+- passwords
+- session cookies or tokens
+- OAuth tokens or raw callback payloads
+- full request bodies for auth or account endpoints
+- unmasked email addresses unless there is a strong operational need
+
+Use high-level operational logs instead, and prefer internal user IDs over email addresses or usernames when possible.
+
+Detailed guidance is documented in [SECURITY_LOGGING.md](/home/eduardo/Programming/programs/daysuntil/SECURITY_LOGGING.md).
+
 ### Useful dev tools
 
 The Nix dev shell also includes a few local debugging tools:

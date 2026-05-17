@@ -208,6 +208,11 @@ func deleteUserAccount(db *sql.DB, userID int64) error {
 	return tx.Commit()
 }
 
+func makeAllIntervalsPrivate(db *sql.DB, userID int64) error {
+	_, err := db.Exec(`UPDATE intervals SET visibility='private' WHERE user_id=?`, userID)
+	return err
+}
+
 func publicProfileBySlug(db *sql.DB, publicSlug string) (PublicProfile, error) {
 	var profile PublicProfile
 	rows, err := db.Query(

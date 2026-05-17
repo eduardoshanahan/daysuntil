@@ -12,6 +12,7 @@ const profilePanel = document.getElementById('profile-panel');
 const profileForm = document.getElementById('profile-form');
 const profileDisplayName = document.getElementById('profile-display-name');
 const profileSave = document.getElementById('profile-save');
+const profileMakePrivate = document.getElementById('profile-make-private');
 const profileRotateLink = document.getElementById('profile-rotate-link');
 const profileDeleteAccount = document.getElementById('profile-delete-account');
 const profileError = document.getElementById('profile-error');
@@ -106,6 +107,7 @@ const api = {
   providers: () => apiFetch('/api/auth/providers'),
   me: () => apiFetch('/api/me'),
   deleteAccount: () => apiFetch('/api/me', { method: 'DELETE' }),
+  makeAllPrivate: () => apiFetch('/api/me/make-private', { method: 'POST' }),
   rotatePublicLink: () => apiFetch('/api/me/public-link/rotate', { method: 'POST' }),
   updateProfile: data => apiFetch('/api/me/profile', { method: 'PUT', body: JSON.stringify(data) }),
   register: data => apiFetch('/api/register', { method: 'POST', body: JSON.stringify(data) }),
@@ -657,6 +659,27 @@ profileForm.addEventListener('submit', async event => {
     const updatedUser = await api.updateProfile({ display_name: displayName });
     setCurrentUser(updatedUser);
     showStatus('Display name updated.', { tone: 'status' });
+  } catch (err) {
+    if (err.status === 401) {
+      handleUnauthorized('Your session has ended. Log in again.');
+      return;
+    }
+    showProfileError(err.message);
+  } finally {
+    setProfileSubmitting(false);
+  }
+});
+
+profileMakePrivate.addEventListener('click', async () => {
+  if (isProfileSubmitting || !currentUser) return;
+  if (!confirm('Make all of your intervals private? Your public link will stop showing them immediately.')) return;
+
+  clearProfileError();
+  try {
+    setProfileSubmitting(true);
+    await api.makeAllPrivate();
+    await loadIntervals();
+    showStatus('All intervals are now private.', { tone: 'status' });
   } catch (err) {
     if (err.status === 401) {
       handleUnauthorized('Your session has ended. Log in again.');
