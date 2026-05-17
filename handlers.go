@@ -132,7 +132,7 @@ func (h *handler) deleteInterval(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) register(w http.ResponseWriter, r *http.Request) {
-	var creds userCredentials
+	var creds registerCredentials
 	if err := decodeJSONBody(w, r, &creds); err != nil {
 		return
 	}
@@ -154,7 +154,7 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) login(w http.ResponseWriter, r *http.Request) {
-	var creds userCredentials
+	var creds loginCredentials
 	if err := decodeJSONBody(w, r, &creds); err != nil {
 		return
 	}
@@ -192,6 +192,26 @@ func (h *handler) currentUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, user)
+}
+
+func (h *handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
+	user, err := authenticatedUser(h.db, r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if err := deleteUserAccount(h.db, user.ID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	clearSessionCookie(w, h.cookieSecure)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *handler) updateProfile(w http.ResponseWriter, r *http.Request) {

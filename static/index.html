@@ -30,8 +30,15 @@
       <p id="auth-subtitle" class="auth-subtitle">Your intervals stay private to your account.</p>
 
       <form id="auth-form" class="auth-form" novalidate>
-        <label for="auth-username">Username</label>
-        <input type="text" id="auth-username" autocomplete="username" required />
+        <div id="auth-email-row">
+          <label for="auth-email">Email</label>
+          <input type="email" id="auth-email" autocomplete="email" required />
+        </div>
+
+        <div id="auth-username-row" class="hidden">
+          <label for="auth-username">Username</label>
+          <input type="text" id="auth-username" autocomplete="username" />
+        </div>
 
         <label for="auth-password">Password</label>
         <input type="password" id="auth-password" autocomplete="current-password" required />
@@ -83,6 +90,9 @@
         </div>
         <p id="profile-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
       </form>
+      <div class="profile-danger">
+        <button id="profile-delete-account" type="button" class="btn-secondary danger">Delete account</button>
+      </div>
     </section>
   </main>
 

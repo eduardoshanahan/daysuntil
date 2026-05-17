@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"os"
 	"strings"
@@ -35,8 +36,14 @@ type User struct {
 	DisplayName string `json:"display_name"`
 }
 
-type userCredentials struct {
+type registerCredentials struct {
+	Email    string `json:"email"`
 	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type loginCredentials struct {
+	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
@@ -68,6 +75,7 @@ type githubTokenResponse struct {
 func initAuthDB(db *sql.DB) error {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS users (
 		id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+		email                 TEXT NOT NULL DEFAULT '',
 		username              TEXT NOT NULL UNIQUE,
 		display_name          TEXT NOT NULL DEFAULT '',
 		password_hash         TEXT NOT NULL,
@@ -82,6 +90,9 @@ func initAuthDB(db *sql.DB) error {
 	if err := ensureUserColumn(db, "display_name", "ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := ensureUserColumn(db, "email", "ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := ensureUserColumn(db, "auth_provider", "ALTER TABLE users ADD COLUMN auth_provider TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
@@ -89,6 +100,10 @@ func initAuthDB(db *sql.DB) error {
 		return err
 	}
 	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_provider_identity ON users(auth_provider, auth_provider_user_id) WHERE auth_provider <> '' AND auth_provider_user_id <> ''`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email <> ''`)
 	if err != nil {
 		return err
 	}
@@ -129,8 +144,28 @@ func ensureUserColumn(db *sql.DB, column, statement string) error {
 	return err
 }
 
-func validateCredentials(creds userCredentials) (string, error) {
-	username := strings.ToLower(strings.TrimSpace(creds.Username))
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+func validateEmail(email string) (string, error) {
+	email = normalizeEmail(email)
+	if email == "" {
+		return "", fmt.Errorf("email is required")
+	}
+	if len(email) > 254 {
+		return "", fmt.Errorf("email must be at most 254 characters")
+	}
+
+	addr, err := mail.ParseAddress(email)
+	if err != nil || !strings.EqualFold(addr.Address, email) {
+		return "", fmt.Errorf("email must be a valid address")
+	}
+	return email, nil
+}
+
+func validateUsername(username string) (string, error) {
+	username = strings.ToLower(strings.TrimSpace(username))
 	if username == "" {
 		return "", fmt.Errorf("username is required")
 	}
@@ -146,14 +181,33 @@ func validateCredentials(creds userCredentials) (string, error) {
 			return "", fmt.Errorf("username may only contain letters, numbers, dots, dashes, and underscores")
 		}
 	}
-	if len(creds.Password) < 8 {
-		return "", fmt.Errorf("password must be at least 8 characters")
-	}
 	return username, nil
 }
 
-func createUser(db *sql.DB, creds userCredentials) (User, error) {
-	username, err := validateCredentials(creds)
+func validatePassword(password string) error {
+	if len(password) < 8 {
+		return fmt.Errorf("password must be at least 8 characters")
+	}
+	return nil
+}
+
+func validateRegistration(creds registerCredentials) (string, string, error) {
+	email, err := validateEmail(creds.Email)
+	if err != nil {
+		return "", "", err
+	}
+	username, err := validateUsername(creds.Username)
+	if err != nil {
+		return "", "", err
+	}
+	if err := validatePassword(creds.Password); err != nil {
+		return "", "", err
+	}
+	return email, username, nil
+}
+
+func createUser(db *sql.DB, creds registerCredentials) (User, error) {
+	email, username, err := validateRegistration(creds)
 	if err != nil {
 		return User{}, err
 	}
@@ -175,12 +229,12 @@ func createUser(db *sql.DB, creds userCredentials) (User, error) {
 	}
 
 	res, err := tx.Exec(
-		`INSERT INTO users (username, display_name, password_hash, auth_provider, auth_provider_user_id, created_at) VALUES (?, ?, ?, '', '', ?)`,
-		username, username, string(passwordHash), time.Now().UTC().Format(time.RFC3339),
+		`INSERT INTO users (email, username, display_name, password_hash, auth_provider, auth_provider_user_id, created_at) VALUES (?, ?, ?, ?, '', '', ?)`,
+		email, username, username, string(passwordHash), time.Now().UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return User{}, fmt.Errorf("username already exists")
+			return User{}, fmt.Errorf("account could not be created with those details")
 		}
 		return User{}, err
 	}
@@ -204,30 +258,30 @@ func createUser(db *sql.DB, creds userCredentials) (User, error) {
 	return User{ID: userID, Username: username, DisplayName: username}, nil
 }
 
-func authenticateUser(db *sql.DB, creds userCredentials) (User, error) {
-	username := strings.ToLower(strings.TrimSpace(creds.Username))
-	if username == "" || creds.Password == "" {
-		return User{}, fmt.Errorf("username and password are required")
+func authenticateUser(db *sql.DB, creds loginCredentials) (User, error) {
+	email := normalizeEmail(creds.Email)
+	if email == "" || creds.Password == "" {
+		return User{}, fmt.Errorf("email and password are required")
 	}
 
 	var user User
 	var passwordHash string
 	err := db.QueryRow(
-		`SELECT id, username, display_name, password_hash FROM users WHERE username=?`,
-		username,
+		`SELECT id, username, display_name, password_hash FROM users WHERE email=?`,
+		email,
 	).Scan(&user.ID, &user.Username, &user.DisplayName, &passwordHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return User{}, fmt.Errorf("invalid username or password")
+			return User{}, fmt.Errorf("invalid email or password")
 		}
 		return User{}, err
 	}
 
 	if passwordHash == "" {
-		return User{}, fmt.Errorf("this account uses GitHub sign-in")
+		return User{}, fmt.Errorf("invalid email or password")
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(creds.Password)); err != nil {
-		return User{}, fmt.Errorf("invalid username or password")
+		return User{}, fmt.Errorf("invalid email or password")
 	}
 
 	return user, nil
@@ -333,7 +387,7 @@ func findOrCreateOAuthUser(db *sql.DB, provider, providerUserID, providerLogin s
 	username := baseUsername
 	for attempt := 2; ; attempt += 1 {
 		res, err := tx.Exec(
-			`INSERT INTO users (username, display_name, password_hash, auth_provider, auth_provider_user_id, created_at) VALUES (?, ?, '', ?, ?, ?)`,
+			`INSERT INTO users (email, username, display_name, password_hash, auth_provider, auth_provider_user_id, created_at) VALUES ('', ?, ?, '', ?, ?, ?)`,
 			username, providerLogin, provider, providerUserID, now,
 		)
 		if err == nil {

@@ -177,6 +177,37 @@ func updateDisplayName(db *sql.DB, userID int64, displayName string) (User, erro
 	return user, nil
 }
 
+func deleteUserAccount(db *sql.DB, userID int64) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Delete child rows explicitly so account deletion does not depend on SQLite
+	// foreign key enforcement settings at runtime.
+	if _, err := tx.Exec(`DELETE FROM sessions WHERE user_id=?`, userID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM intervals WHERE user_id=?`, userID); err != nil {
+		return err
+	}
+
+	res, err := tx.Exec(`DELETE FROM users WHERE id=?`, userID)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+
+	return tx.Commit()
+}
+
 func publicProfileByUsername(db *sql.DB, username string) (PublicProfile, error) {
 	var profile PublicProfile
 	err := db.QueryRow(`SELECT username, display_name FROM users WHERE username=?`, username).Scan(&profile.Username, &profile.DisplayName)

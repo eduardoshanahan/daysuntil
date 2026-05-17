@@ -4,7 +4,7 @@ A small homelab web application to track named time intervals. For each interval
 
 ## Features
 
-- Local username/password accounts
+- Local email/password accounts with separate public usernames
 - Optional GitHub OAuth alongside local login
 - Basic in-memory rate limiting on login and registration endpoints
 - Add, edit, and delete named intervals (start date → end date)
@@ -113,7 +113,7 @@ DB_PATH=/tmp/daysuntil-dev.db nix develop -c go run .
 
 ### Local GitHub OAuth testing
 
-Keep local username/password login enabled and add GitHub OAuth on top:
+Keep local email/password login enabled and add GitHub OAuth on top:
 
 ```bash
 export BASE_URL=http://localhost:8080

@@ -12,6 +12,7 @@ const profilePanel = document.getElementById('profile-panel');
 const profileForm = document.getElementById('profile-form');
 const profileDisplayName = document.getElementById('profile-display-name');
 const profileSave = document.getElementById('profile-save');
+const profileDeleteAccount = document.getElementById('profile-delete-account');
 const profileError = document.getElementById('profile-error');
 const profileLink = document.getElementById('profile-link');
 const publicProfileHeader = document.getElementById('public-profile-header');
@@ -47,6 +48,8 @@ const datePrev = document.getElementById('date-prev');
 const dateNext = document.getElementById('date-next');
 
 const authForm = document.getElementById('auth-form');
+const authUsernameRow = document.getElementById('auth-username-row');
+const authEmail = document.getElementById('auth-email');
 const authUsername = document.getElementById('auth-username');
 const authPassword = document.getElementById('auth-password');
 const authError = document.getElementById('auth-error');
@@ -101,6 +104,7 @@ const api = {
   version: () => apiFetch('/api/version'),
   providers: () => apiFetch('/api/auth/providers'),
   me: () => apiFetch('/api/me'),
+  deleteAccount: () => apiFetch('/api/me', { method: 'DELETE' }),
   updateProfile: data => apiFetch('/api/me/profile', { method: 'PUT', body: JSON.stringify(data) }),
   register: data => apiFetch('/api/register', { method: 'POST', body: JSON.stringify(data) }),
   login: data => apiFetch('/api/login', { method: 'POST', body: JSON.stringify(data) }),
@@ -247,6 +251,8 @@ function setCurrentUser(user) {
     profileDisplayName.value = user.display_name || user.username;
     profileLink.href = `${window.location.origin}/u/${user.username}`;
     profileLink.textContent = profileLink.href;
+    authEmail.value = '';
+    authUsername.value = '';
     authPassword.value = '';
     clearAuthError();
   } else {
@@ -444,11 +450,14 @@ function setAuthMode(registerMode) {
   authKicker.textContent = registerMode ? 'Create account' : 'Login';
   authTitle.textContent = registerMode ? 'Create your account' : 'Sign in to your account';
   authSubtitle.textContent = registerMode
-    ? 'Each account gets its own private interval list, with optional public cards.'
-    : 'Your intervals stay private unless you mark them public.';
+    ? 'Use your email to sign in, and choose a separate public username.'
+    : 'Sign in with your email. Your public username stays separate.';
   authSubmit.textContent = registerMode ? 'Create account' : 'Log in';
   authSwitchLabel.textContent = registerMode ? 'Already have an account?' : 'Need an account?';
   authSwitch.textContent = registerMode ? 'Log in instead' : 'Create one';
+  authUsernameRow.classList.toggle('hidden', !registerMode);
+  authUsername.required = registerMode;
+  authEmail.autocomplete = 'email';
   authPassword.autocomplete = registerMode ? 'new-password' : 'current-password';
   clearAuthError();
 }
@@ -457,6 +466,7 @@ function setAuthSubmitting(nextValue) {
   isAuthSubmitting = nextValue;
   authSubmit.disabled = nextValue;
   authSwitch.disabled = nextValue;
+  authEmail.disabled = nextValue;
   authUsername.disabled = nextValue;
   authPassword.disabled = nextValue;
   authGithub.classList.toggle('disabled', nextValue);
@@ -466,6 +476,7 @@ function setAuthSubmitting(nextValue) {
 function setProfileSubmitting(nextValue) {
   isProfileSubmitting = nextValue;
   profileSave.disabled = nextValue;
+  profileDeleteAccount.disabled = nextValue;
   profileDisplayName.disabled = nextValue;
 }
 
@@ -517,7 +528,7 @@ function handleUnauthorized(message) {
   list.innerHTML = '<p id="loading-msg" class="empty-msg">Loading intervals...</p>';
   setAuthMode(false);
   showAuthError(message);
-  authUsername.focus();
+  authEmail.focus();
 }
 
 async function confirmDelete(iv) {
@@ -566,7 +577,11 @@ btnRetry.addEventListener('click', () => {
 });
 authSwitch.addEventListener('click', () => {
   setAuthMode(!isRegisterMode);
-  authUsername.focus();
+  if (isRegisterMode) {
+    authUsername.focus();
+  } else {
+    authEmail.focus();
+  }
 });
 overlay.addEventListener('click', event => {
   if (event.target === overlay) closeModal();
@@ -603,16 +618,18 @@ authForm.addEventListener('submit', async event => {
   if (isAuthSubmitting) return;
 
   clearAuthError();
+  const email = authEmail.value.trim();
   const username = authUsername.value.trim();
   const password = authPassword.value;
-  if (!username) return showAuthError('Username is required.');
+  if (!email) return showAuthError('Email is required.');
+  if (isRegisterMode && !username) return showAuthError('Username is required.');
   if (!password) return showAuthError('Password is required.');
 
   try {
     setAuthSubmitting(true);
     const user = isRegisterMode
-      ? await api.register({ username, password })
-      : await api.login({ username, password });
+      ? await api.register({ email, username, password })
+      : await api.login({ email, password });
     setCurrentUser(user);
     clearStatus();
     list.innerHTML = '<p id="loading-msg" class="empty-msg">Loading intervals...</p>';
@@ -637,6 +654,26 @@ profileForm.addEventListener('submit', async event => {
     const updatedUser = await api.updateProfile({ display_name: displayName });
     setCurrentUser(updatedUser);
     showStatus('Display name updated.', { tone: 'status' });
+  } catch (err) {
+    if (err.status === 401) {
+      handleUnauthorized('Your session has ended. Log in again.');
+      return;
+    }
+    showProfileError(err.message);
+  } finally {
+    setProfileSubmitting(false);
+  }
+});
+
+profileDeleteAccount.addEventListener('click', async () => {
+  if (isProfileSubmitting || !currentUser) return;
+  if (!confirm(`Delete account "${currentUser.username}"? This will permanently remove your intervals and session.`)) return;
+
+  clearProfileError();
+  try {
+    setProfileSubmitting(true);
+    await api.deleteAccount();
+    handleUnauthorized('Account deleted.');
   } catch (err) {
     if (err.status === 401) {
       handleUnauthorized('Your session has ended. Log in again.');
@@ -726,7 +763,7 @@ async function initPrivateApp() {
     } else if (err.status !== 401) {
       showAuthError(err.message);
     }
-    authUsername.focus();
+    authEmail.focus();
   }
 }
 

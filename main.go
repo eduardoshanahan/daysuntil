@@ -61,6 +61,7 @@ func newRouter(h *handler) http.Handler {
 	r.With(authRateLimitMiddleware(h.authLimiter, authActionLogin)).Post("/api/login", h.login)
 	r.Post("/api/logout", h.logout)
 	r.Get("/api/me", h.currentUser)
+	r.Delete("/api/me", h.deleteAccount)
 	r.Put("/api/me/profile", h.updateProfile)
 	r.Get("/api/auth/providers", h.authProviders)
 	r.Get("/api/public/users/{username}", h.publicProfile)
