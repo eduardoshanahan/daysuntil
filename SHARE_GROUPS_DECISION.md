@@ -49,7 +49,7 @@ Examples:
 Each group gets one public route such as:
 
 ```text
-/g/forest-harbor-otter
+/g/forest-harbor-otter-k7m4q
 ```
 
 That route shows only the intervals assigned to that group.
@@ -211,9 +211,22 @@ This improves privacy because:
 - sharing several intervals becomes an explicit grouping action
 - sharing one interval no longer requires account-wide public state
 
-This does not make shared content secret.
+This does not make shared content fully secret.
 
-Anyone who knows a group slug can still access that public group. The privacy gain comes from reducing scope, not from turning public links into high-entropy secret tokens.
+Anyone who knows a group slug can still access that public group. The privacy gain comes from reducing scope, not from turning public links into a fully authenticated access model.
+
+To improve resistance to brute-force discovery while keeping links readable, share-group slugs will use:
+
+- three readable words
+- plus a five-character random base36 suffix
+
+Example:
+
+```text
+forest-harbor-otter-k7m4q
+```
+
+This keeps the human-friendly part of the URL while making large-scale enumeration impractical for this app.
 
 ## Out of scope for version one
 

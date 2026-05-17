@@ -610,7 +610,7 @@ func publicShareGroupBySlug(db *sql.DB, groupSlug string) (PublicShareGroup, err
 
 func createUniqueShareGroupSlug(db *sql.DB) (string, error) {
 	for attempt := 0; attempt < 20; attempt++ {
-		slug, err := randomPublicSlug()
+		slug, err := randomShareGroupSlug()
 		if err != nil {
 			return "", err
 		}

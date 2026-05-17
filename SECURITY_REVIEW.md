@@ -30,24 +30,23 @@ Relevant files:
 Problem:
 
 - public share groups are exposed through `/g/{slug}` and `/api/public/groups/{groupSlug}`
-- share-group slugs are generated from three words chosen from a fixed list of 93 words
-- that gives `93^3 = 804,357` possible slugs, which is readable but not high-entropy
+- share-group slugs are generated as three words plus a five-character base36 suffix
+- that is much stronger than the earlier plain three-word scheme, but the route still represents public content rather than authenticated access
 - there is no rate limiting on public group lookup
 
 Impact:
 
-- an attacker can enumerate a practical slug space and discover shared groups over time
-- this means the current share-group links are privacy-friendly identifiers, not secret links
-- if a user assumes “hard to guess” means “effectively private,” that assumption is too strong
+- share-group links should still be treated as public links if disclosed
+- the current slug format is suitable for readable, hard-to-guess sharing, but not for access control
+- if the product ever needs stronger secrecy guarantees, link knowledge alone should not be the protection boundary
 
 Suggested fix direction:
 
 - document clearly that share-group links are public if discovered
-- if stronger privacy is wanted, increase slug entropy
+- if stronger privacy is wanted later, move from “hard to guess” toward explicit secret tokens or expiring links
 - practical options:
-  - add a short random suffix
-  - use more words
   - use a separate opaque token for public lookup
+  - add expiry
 - optional defense-in-depth:
   - add lightweight rate limiting on `/api/public/groups/{groupSlug}`
 

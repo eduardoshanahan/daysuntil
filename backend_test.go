@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -12,6 +13,8 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+var shareGroupSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+){3}$`)
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -107,7 +110,23 @@ func createShareGroupForTest(t *testing.T, router http.Handler, cookie *http.Coo
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create share group: expected 201, got %d (%s)", rec.Code, rec.Body.String())
 	}
-	return decodeShareGroup(t, rec)
+	group := decodeShareGroup(t, rec)
+	assertShareGroupSlug(t, group.PublicSlug)
+	return group
+}
+
+func assertShareGroupSlug(t *testing.T, slug string) {
+	t.Helper()
+	if !shareGroupSlugPattern.MatchString(slug) {
+		t.Fatalf("expected share group slug to have three readable parts and one suffix, got %q", slug)
+	}
+	parts := strings.Split(slug, "-")
+	if len(parts) != 4 {
+		t.Fatalf("expected 4 slug parts, got %d in %q", len(parts), slug)
+	}
+	if len(parts[3]) != shareGroupSlugSuffixLength {
+		t.Fatalf("expected suffix length %d, got %d in %q", shareGroupSlugSuffixLength, len(parts[3]), slug)
+	}
 }
 
 func TestInitDBAddsColumnsToLegacySchema(t *testing.T) {
@@ -406,6 +425,7 @@ func TestShareGroupsListCreateUpdateRotateAndDelete(t *testing.T) {
 	if group.PublicSlug == "" {
 		t.Fatal("expected public slug for share group")
 	}
+	assertShareGroupSlug(t, group.PublicSlug)
 
 	listRec := performRequest(t, router, http.MethodGet, "/api/share-groups", "", cookie)
 	if listRec.Code != http.StatusOK {
@@ -436,6 +456,7 @@ func TestShareGroupsListCreateUpdateRotateAndDelete(t *testing.T) {
 	if rotatedGroup.PublicSlug == "" || rotatedGroup.PublicSlug == group.PublicSlug {
 		t.Fatalf("expected rotated slug, got %q from %q", rotatedGroup.PublicSlug, group.PublicSlug)
 	}
+	assertShareGroupSlug(t, rotatedGroup.PublicSlug)
 
 	deleteRec := performRequest(t, router, http.MethodDelete, "/api/share-groups/"+strconv.FormatInt(group.ID, 10), "", cookie)
 	if deleteRec.Code != http.StatusNoContent {

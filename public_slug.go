@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const shareGroupSlugSuffixLength = 5
+
 var publicSlugWords = []string{
 	"amber", "apple", "atlas", "autumn", "basil", "beacon", "berry", "birch",
 	"blossom", "breeze", "brook", "canyon", "cedar", "cloud", "clover", "copper",
@@ -42,7 +44,7 @@ func assignPublicSlug(db *sql.DB, userID int64, onlyIfBlank bool) (string, error
 	}
 
 	for attempt := 0; attempt < 20; attempt++ {
-		slug, err := randomPublicSlug()
+		slug, err := randomReadableSlug()
 		if err != nil {
 			return "", err
 		}
@@ -77,7 +79,7 @@ func assignPublicSlug(db *sql.DB, userID int64, onlyIfBlank bool) (string, error
 	return "", fmt.Errorf("failed to allocate public slug")
 }
 
-func randomPublicSlug() (string, error) {
+func randomReadableSlug() (string, error) {
 	parts := make([]string, 3)
 	for i := range parts {
 		word, err := randomSlugWord()
@@ -89,6 +91,18 @@ func randomPublicSlug() (string, error) {
 	return strings.Join(parts, "-"), nil
 }
 
+func randomShareGroupSlug() (string, error) {
+	readable, err := randomReadableSlug()
+	if err != nil {
+		return "", err
+	}
+	suffix, err := randomBase36String(shareGroupSlugSuffixLength)
+	if err != nil {
+		return "", err
+	}
+	return readable + "-" + suffix, nil
+}
+
 func randomSlugWord() (string, error) {
 	max := big.NewInt(int64(len(publicSlugWords)))
 	n, err := crand.Int(crand.Reader, max)
@@ -96,4 +110,21 @@ func randomSlugWord() (string, error) {
 		return "", err
 	}
 	return publicSlugWords[n.Int64()], nil
+}
+
+func randomBase36String(length int) (string, error) {
+	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+	var builder strings.Builder
+	builder.Grow(length)
+
+	max := big.NewInt(int64(len(alphabet)))
+	for i := 0; i < length; i++ {
+		n, err := crand.Int(crand.Reader, max)
+		if err != nil {
+			return "", err
+		}
+		builder.WriteByte(alphabet[n.Int64()])
+	}
+
+	return builder.String(), nil
 }
