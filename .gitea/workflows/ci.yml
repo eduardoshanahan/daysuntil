@@ -23,10 +23,9 @@ jobs:
       - name: Inject homelab CA into BuildKit
         run: |
           container=$(docker ps --format '{{.Names}}' | grep buildx_buildkit | head -1)
-          docker cp /etc/ssl/certs/ca-certificates.crt \
-            "$container:/usr/local/share/ca-certificates/homelab-ca.crt"
+          docker cp /etc/ssl/certs/ca-certificates.crt "$container:/tmp/homelab-ca.crt"
           docker exec "$container" sh -c \
-            'cat /usr/local/share/ca-certificates/homelab-ca.crt >> /etc/ssl/certs/ca-certificates.crt'
+            'cat /tmp/homelab-ca.crt >> /etc/ssl/certs/ca-certificates.crt'
 
       - name: Log in to Gitea registry
         uses: docker/login-action@v3
