@@ -55,3 +55,15 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           build-args: |
             APP_VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+
+      - name: Deploy to rpi-box-01
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+          ssh -i /tmp/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            eduardo@rpi-box-01.hhlab.home.arpa \
+            "docker pull gitea.hhlab.home.arpa/eduardo/daysuntil:latest && sudo systemctl restart daysuntil"
+          rm -f /tmp/deploy_key
