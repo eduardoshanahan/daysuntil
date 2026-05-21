@@ -1,2 +1,3 @@
 daysuntil
 *.db
+.envrc
