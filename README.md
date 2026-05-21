@@ -164,7 +164,7 @@ Do not log:
 
 Use high-level operational logs instead, and prefer internal user IDs over email addresses or usernames when possible.
 
-Detailed guidance is documented in [SECURITY_LOGGING.md](/home/eduardo/Programming/programs/daysuntil/SECURITY_LOGGING.md).
+Detailed guidance is documented in [SECURITY_LOGGING.md](SECURITY_LOGGING.md).
 
 ### Useful dev tools
 
@@ -229,4 +229,4 @@ Container and CI builds stamp the binary with:
 - `${CI_COMMIT_SHA}` for `main`
 - `${CI_COMMIT_TAG}` for tagged releases
 
-Document release notes in [CHANGELOG.md](/home/eduardo/Programming/programs/daysuntil/CHANGELOG.md).
+Document release notes in [CHANGELOG.md](CHANGELOG.md).
