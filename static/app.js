@@ -273,6 +273,17 @@ function renderCard(iv, options = {}) {
         <button type="button" class="btn-icon btn-move-down" title="Move down" aria-label="Move ${escHtml(iv.name)} down" ${!canMoveDown || isDeleting ? 'disabled' : ''}>Down</button>
         <button type="button" class="btn-icon btn-edit" title="Edit" aria-label="Edit ${escHtml(iv.name)}" ${isDeleting ? 'disabled' : ''}>Edit</button>
         <button type="button" class="btn-icon danger btn-delete" title="Delete" aria-label="${isDeleting ? `Deleting ${escHtml(iv.name)}` : `Delete ${escHtml(iv.name)}`}" ${isDeleting ? 'disabled' : ''}>${isDeleting ? 'Deleting...' : 'Delete'}</button>
+      </div>
+      <button type="button" class="btn-icon btn-card-menu" aria-label="Actions for ${escHtml(iv.name)}" aria-expanded="false" aria-haspopup="true">&#8942;</button>`
+    : '';
+
+  const cardMenu = showActions
+    ? `<div class="card-menu hidden" role="menu">
+        <button type="button" class="card-menu-item btn-move-up" role="menuitem" ${!canMoveUp || isDeleting ? 'disabled' : ''}>&#8593; Move up</button>
+        <button type="button" class="card-menu-item btn-move-down" role="menuitem" ${!canMoveDown || isDeleting ? 'disabled' : ''}>&#8595; Move down</button>
+        <div class="card-menu-divider"></div>
+        <button type="button" class="card-menu-item btn-edit" role="menuitem" ${isDeleting ? 'disabled' : ''}>&#9998; Edit</button>
+        <button type="button" class="card-menu-item danger btn-delete" role="menuitem" ${isDeleting ? 'disabled' : ''}>${isDeleting ? 'Deleting...' : '&#10005; Delete'}</button>
       </div>`
     : '';
 
@@ -289,6 +300,7 @@ function renderCard(iv, options = {}) {
       <div class="bar-track"><div class="bar-fill"></div></div>
       <span class="day-label left">${leftText}</span>
     </div>
+    ${cardMenu}
   `;
   card.querySelector('.bar-fill').style.width = `${progress.pct}%`;
   return card;
@@ -858,6 +870,32 @@ list.addEventListener('click', event => {
   const card = button.closest('.card');
   if (!card) return;
 
+  if (button.classList.contains('btn-card-menu')) {
+    event.preventDefault();
+    event.stopPropagation();
+    document.querySelectorAll('.card-menu:not(.hidden)').forEach(m => {
+      if (m.closest('.card') !== card) {
+        m.classList.add('hidden');
+        const mb = m.closest('.card').querySelector('.btn-card-menu');
+        if (mb) mb.setAttribute('aria-expanded', 'false');
+      }
+    });
+    const menu = card.querySelector('.card-menu');
+    if (menu) {
+      const isOpen = !menu.classList.contains('hidden');
+      menu.classList.toggle('hidden', isOpen);
+      button.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+    }
+    return;
+  }
+
+  const openMenu = card.querySelector('.card-menu:not(.hidden)');
+  if (openMenu) {
+    openMenu.classList.add('hidden');
+    const mb = card.querySelector('.btn-card-menu');
+    if (mb) mb.setAttribute('aria-expanded', 'false');
+  }
+
   const id = Number(card.dataset.id);
   const interval = currentIntervals.find(item => item.id === id);
   if (!interval) return;
@@ -951,6 +989,13 @@ document.addEventListener('click', event => {
       closeMobileMenu();
     }
   }
+  document.querySelectorAll('.card-menu:not(.hidden)').forEach(menu => {
+    const menuBtn = menu.closest('.card').querySelector('.btn-card-menu');
+    if (!menu.contains(event.target) && event.target !== menuBtn) {
+      menu.classList.add('hidden');
+      if (menuBtn) menuBtn.setAttribute('aria-expanded', 'false');
+    }
+  });
   if (datePicker.classList.contains('hidden')) return;
   const clickedInsidePicker = datePicker.contains(event.target);
   const clickedTrigger = [fieldStart, fieldEnd, btnPickStart, btnPickEnd].includes(event.target);
@@ -962,6 +1007,11 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape') {
     closeModal();
     closeMobileMenu();
+    document.querySelectorAll('.card-menu:not(.hidden)').forEach(menu => {
+      menu.classList.add('hidden');
+      const mb = menu.closest('.card').querySelector('.btn-card-menu');
+      if (mb) mb.setAttribute('aria-expanded', 'false');
+    });
   }
   if (event.key === 'Tab' && !overlay.classList.contains('hidden')) trapModalFocus(event);
 });

@@ -48,6 +48,11 @@
 
 @media (hover: none), (pointer: coarse) {
   .card-actions {
-    opacity: 1;
+    display: none;
+  }
+
+  .btn-card-menu {
+    display: flex;
+    align-items: center;
   }
 }
