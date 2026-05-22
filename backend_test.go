@@ -772,6 +772,15 @@ func TestLoginRejectsUsernameAsIdentifier(t *testing.T) {
 	}
 }
 
+func TestRegisterRejectsEmailWithoutDotInDomain(t *testing.T) {
+	_, router := newTestServer(t)
+
+	rec := performRequest(t, router, http.MethodPost, "/api/register", `{"email":"contact@nodomain","username":"alice","password":"password123"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for email without dot in domain, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
 func TestOAuthAccountCannotUseLocalPasswordLogin(t *testing.T) {
 	db, router := newTestServer(t)
 

@@ -173,6 +173,10 @@ func validateEmail(email string) (string, error) {
 	if err != nil || !strings.EqualFold(addr.Address, email) {
 		return "", fmt.Errorf("email must be a valid address")
 	}
+	parts := strings.SplitN(addr.Address, "@", 2)
+	if len(parts) != 2 || !strings.Contains(parts[1], ".") {
+		return "", fmt.Errorf("email must be a valid address")
+	}
 	return email, nil
 }
 
