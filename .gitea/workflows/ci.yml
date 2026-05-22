@@ -38,8 +38,13 @@ jobs:
       - name: Compute version
         id: version
         run: |
-          BASE=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || echo 'v0.0.0')
-          COUNT=$(git rev-list --count "${BASE}..HEAD")
+          BASE=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || echo '')
+          if [ -n "${BASE}" ]; then
+            COUNT=$(git rev-list --count "${BASE}..HEAD")
+          else
+            BASE="v0.0.0"
+            COUNT=$(git rev-list --count HEAD)
+          fi
           if [ "${{ github.ref_type }}" = "tag" ]; then
             VERSION="${{ github.ref_name }}"
           elif [ "${COUNT}" = "0" ]; then
