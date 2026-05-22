@@ -26,6 +26,9 @@ const (
 	sessionTTL        = 30 * 24 * time.Hour
 )
 
+var errUserNotFound = errors.New("user not found")
+var errWrongPassword = errors.New("wrong password")
+
 type contextKey string
 
 const userContextKey contextKey = "authenticated-user"
@@ -286,16 +289,16 @@ func authenticateUser(db *sql.DB, creds loginCredentials) (User, error) {
 	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &passwordHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return User{}, fmt.Errorf("invalid email or password")
+			return User{}, errUserNotFound
 		}
 		return User{}, err
 	}
 
 	if passwordHash == "" {
-		return User{}, fmt.Errorf("invalid email or password")
+		return user, errUserNotFound
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(creds.Password)); err != nil {
-		return User{}, fmt.Errorf("invalid email or password")
+		return user, errWrongPassword
 	}
 
 	user.PublicSlug, err = ensurePublicSlug(db, user.ID, user.PublicSlug)

@@ -115,6 +115,16 @@ func authRateLimitMiddleware(limiter *authRateLimiter, action string) func(http.
 }
 
 func clientIPFromRequest(r *http.Request) string {
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		ip := xff
+		if idx := strings.IndexByte(xff, ','); idx != -1 {
+			ip = strings.TrimSpace(xff[:idx])
+		}
+		if ip != "" {
+			return ip
+		}
+	}
+
 	remoteAddr := strings.TrimSpace(r.RemoteAddr)
 	if remoteAddr == "" {
 		return "unknown"

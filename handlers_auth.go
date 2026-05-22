@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -19,6 +21,7 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) {
 
 	user, err := createUser(h.db, creds)
 	if err != nil {
+		log.Printf("auth: register failed: %v", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -41,7 +44,15 @@ func (h *handler) login(w http.ResponseWriter, r *http.Request) {
 
 	user, err := authenticateUser(h.db, creds)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
+		switch {
+		case errors.Is(err, errUserNotFound):
+			log.Printf("auth: login failed: no account found") // TODO: remove once login bug is resolved
+		case errors.Is(err, errWrongPassword):
+			log.Printf("auth: login failed: wrong password for user_id=%d", user.ID) // TODO: remove once login bug is resolved
+		default:
+			log.Printf("auth: login error: %v", err)
+		}
+		http.Error(w, "invalid email or password", http.StatusUnauthorized)
 		return
 	}
 
