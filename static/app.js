@@ -32,6 +32,12 @@ const {
   btnAdd,
   btnCancel,
   btnLogout,
+  btnMenu,
+  mobileMenu,
+  menuGroupsBadge,
+  menuLogout,
+  menuUserBadge,
+  menuVersion,
   btnPickEnd,
   btnPickStart,
   btnRetry,
@@ -298,6 +304,7 @@ function setCurrentUser(user) {
   btnLogout.classList.toggle('hidden', !isAuthenticated || isPublicView);
   userBadge.classList.toggle('hidden', !isAuthenticated || isPublicView);
   groupsBadge.classList.toggle('hidden', !isAuthenticated || isPublicView);
+  btnMenu.classList.toggle('hidden', !isAuthenticated || isPublicView);
   publicGroupHeader.classList.toggle('hidden', !isPublicView);
 
   if (isAuthenticated) {
@@ -306,6 +313,7 @@ function setCurrentUser(user) {
     shareGroupsPanel.classList.add('hidden');
     shareGroupsPanel.open = false;
     userBadge.textContent = user.display_name || user.username;
+    menuUserBadge.textContent = user.display_name || user.username;
     profileDisplayName.value = user.display_name || user.username;
     updateManagementSummaries();
     authEmail.value = '';
@@ -314,6 +322,8 @@ function setCurrentUser(user) {
     clearAuthError();
   } else {
     userBadge.textContent = '';
+    menuUserBadge.textContent = '';
+    closeMobileMenu();
     currentShareGroups = [];
     currentIntervals = [];
     activeIntervalFilter = 'all';
@@ -351,6 +361,12 @@ function renderCurrentIntervals(options = {}) {
 
 function setVersionLabel(label) {
   appVersion.textContent = label || 'dev';
+  menuVersion.textContent = label || 'dev';
+}
+
+function closeMobileMenu() {
+  mobileMenu.classList.add('hidden');
+  btnMenu.setAttribute('aria-expanded', 'false');
 }
 
 async function loadIntervals(options = {}) {
@@ -815,6 +831,24 @@ async function removeShareGroup(group) {
   }
 }
 
+btnMenu.addEventListener('click', event => {
+  event.stopPropagation();
+  const isOpen = !mobileMenu.classList.contains('hidden');
+  mobileMenu.classList.toggle('hidden', isOpen);
+  btnMenu.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+});
+menuUserBadge.addEventListener('click', () => {
+  closeMobileMenu();
+  userBadge.click();
+});
+menuGroupsBadge.addEventListener('click', () => {
+  closeMobileMenu();
+  groupsBadge.click();
+});
+menuLogout.addEventListener('click', () => {
+  closeMobileMenu();
+  btnLogout.click();
+});
 btnAdd.addEventListener('click', openAdd);
 btnCancel.addEventListener('click', closeModal);
 list.addEventListener('click', event => {
@@ -912,6 +946,11 @@ btnPickEnd.addEventListener('click', () => openDatePicker(fieldEnd));
 fieldStart.addEventListener('focus', () => openDatePicker(fieldStart));
 fieldEnd.addEventListener('focus', () => openDatePicker(fieldEnd));
 document.addEventListener('click', event => {
+  if (!mobileMenu.classList.contains('hidden')) {
+    if (!mobileMenu.contains(event.target) && event.target !== btnMenu) {
+      closeMobileMenu();
+    }
+  }
   if (datePicker.classList.contains('hidden')) return;
   const clickedInsidePicker = datePicker.contains(event.target);
   const clickedTrigger = [fieldStart, fieldEnd, btnPickStart, btnPickEnd].includes(event.target);
@@ -920,7 +959,10 @@ document.addEventListener('click', event => {
   }
 });
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape') closeModal();
+  if (event.key === 'Escape') {
+    closeModal();
+    closeMobileMenu();
+  }
   if (event.key === 'Tab' && !overlay.classList.contains('hidden')) trapModalFocus(event);
 });
 document.addEventListener('visibilitychange', () => {
@@ -1127,6 +1169,7 @@ function initPublicView() {
   authView.classList.add('hidden');
   btnAdd.classList.add('hidden');
   btnLogout.classList.add('hidden');
+  btnMenu.classList.add('hidden');
   userBadge.classList.add('hidden');
   profilePanel.classList.add('hidden');
   shareGroupsPanel.classList.add('hidden');

@@ -9,8 +9,21 @@
     gap: 0.5rem;
   }
 
+  .app-version {
+    display: none;
+  }
+
   .user-badge {
     display: none;
+  }
+
+  .btn-logout {
+    display: none;
+  }
+
+  .btn-menu {
+    display: flex;
+    align-items: center;
   }
 
   .progress-row {
