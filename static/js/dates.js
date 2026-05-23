@@ -39,22 +39,22 @@
     const now = today();
     const start = parseDate(iv.start_date);
     const end = parseDate(iv.end_date);
-    const total = diffDays(start, end);
-    const past = diffDays(start, now);
-    const left = diffDays(now, end);
+    const total = diffDays(start, end) + 1;
 
     if (now < start) {
-      return { status: 'upcoming', past: 0, left: diffDays(now, end), total, pct: 0 };
+      return { status: 'upcoming', past: 0, left: total, total, untilStart: diffDays(now, start), pct: 0 };
     }
     if (now > end) {
-      return { status: 'ended', past: diffDays(end, now), left: 0, total, pct: 100 };
+      return { status: 'ended', past: diffDays(end, now), left: 0, total, untilStart: 0, pct: 100 };
     }
-    const pct = total > 0 ? Math.round((past / total) * 100) : 100;
-    return { status: 'active', past, left, total, pct };
+    const past = diffDays(start, now);
+    const left = diffDays(now, end) + 1;
+    const pct = total > 1 ? Math.round((past / (total - 1)) * 100) : 100;
+    return { status: 'active', past, left, total, untilStart: 0, pct };
   }
 
   function statusLabel(status, progress) {
-    if (status === 'upcoming') return `starts in ${progress.left} day${progress.left !== 1 ? 's' : ''}`;
+    if (status === 'upcoming') return `starts in ${progress.untilStart} day${progress.untilStart !== 1 ? 's' : ''}`;
     if (status === 'ended') return `ended ${progress.past} day${progress.past !== 1 ? 's' : ''} ago`;
     return 'in progress';
   }

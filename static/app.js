@@ -1147,7 +1147,7 @@ form.addEventListener('submit', async event => {
   if (!end) return showError('End date is required.');
   if (!isValidISODate(start)) return showError('Start date must be in YYYY-MM-DD format.');
   if (!isValidISODate(end)) return showError('End date must be in YYYY-MM-DD format.');
-  if (start >= end) return showError('End date must be after start date.');
+  if (start > end) return showError('End date must be on or after start date.');
 
   const data = { name, start_date: start, end_date: end, color: fieldColor.value, share_group_id: shareGroupID };
 

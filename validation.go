@@ -20,8 +20,8 @@ func validateInterval(iv Interval, db *sql.DB, userID int64) (*int64, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid end_date: %w", err)
 	}
-	if !end.After(start) {
-		return nil, fmt.Errorf("end_date must be after start_date")
+	if end.Before(start) {
+		return nil, fmt.Errorf("end_date must be on or after start_date")
 	}
 	groupID, err := shareGroupOwnedByUser(db, userID, iv.ShareGroupID)
 	if err != nil {

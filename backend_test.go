@@ -186,7 +186,23 @@ func TestInitDBAddsEmailColumnToLegacyUsersSchema(t *testing.T) {
 	}
 }
 
-func TestValidateIntervalRejectsNonIncreasingDates(t *testing.T) {
+func TestValidateIntervalRejectsEndDateBeforeStartDate(t *testing.T) {
+	db := openTestDB(t)
+	if err := initDB(db); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	_, err := validateInterval(Interval{
+		Name:      "Test",
+		StartDate: "2026-05-20",
+		EndDate:   "2026-05-19",
+	}, db, 1)
+	if err == nil {
+		t.Fatal("expected validation error when end date is before start date")
+	}
+}
+
+func TestValidateIntervalAllowsSameDayRange(t *testing.T) {
 	db := openTestDB(t)
 	if err := initDB(db); err != nil {
 		t.Fatalf("init db: %v", err)
@@ -197,8 +213,8 @@ func TestValidateIntervalRejectsNonIncreasingDates(t *testing.T) {
 		StartDate: "2026-05-20",
 		EndDate:   "2026-05-20",
 	}, db, 1)
-	if err == nil {
-		t.Fatal("expected validation error for equal start and end date")
+	if err != nil {
+		t.Fatalf("expected same-day interval to be valid, got %v", err)
 	}
 }
 
