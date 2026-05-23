@@ -21,6 +21,7 @@ const {
   authKicker,
   authOAuth,
   authPassword,
+  authPasswordRow,
   authSubmit,
   authSubtitle,
   authSwitch,
@@ -91,6 +92,7 @@ let isAuthSubmitting = false;
 let isProfileSubmitting = false;
 let isShareGroupSubmitting = false;
 let isRegisterMode = false;
+let isMagicLinkEnabled = false;
 let activeLoadToken = 0;
 const pendingDeleteIds = new Set();
 let lastFocusedElement = null;
@@ -628,12 +630,16 @@ function setAuthMode(registerMode) {
   authTitle.textContent = registerMode ? 'Create your account' : 'Sign in to your account';
   authSubtitle.textContent = registerMode
     ? 'Use your email to sign in, and choose a separate public username.'
-    : 'Sign in with your email. Share groups stay separate from your account identity.';
-  authSubmit.textContent = registerMode ? 'Create account' : 'Log in';
+    : isMagicLinkEnabled
+      ? 'Enter your email and we will send you a one-time sign-in link.'
+      : 'Sign in with your email. Share groups stay separate from your account identity.';
+  authSubmit.textContent = registerMode ? 'Create account' : (isMagicLinkEnabled ? 'Email me a link' : 'Log in');
   authSwitchLabel.textContent = registerMode ? 'Already have an account?' : 'Need an account?';
   authSwitch.textContent = registerMode ? 'Log in instead' : 'Create one';
   authUsernameRow.classList.toggle('hidden', !registerMode);
+  authPasswordRow.classList.toggle('hidden', !registerMode && isMagicLinkEnabled);
   authUsername.required = registerMode;
+  authPassword.required = registerMode || !isMagicLinkEnabled;
   authEmail.autocomplete = 'email';
   authPassword.autocomplete = registerMode ? 'new-password' : 'current-password';
   clearAuthError();
@@ -1044,18 +1050,28 @@ authForm.addEventListener('submit', async event => {
   const password = authPassword.value;
   if (!email) return showAuthError('Email is required.');
   if (isRegisterMode && !username) return showAuthError('Username is required.');
-  if (!password) return showAuthError('Password is required.');
+  if ((isRegisterMode || !isMagicLinkEnabled) && !password) return showAuthError('Password is required.');
 
   try {
     setAuthSubmitting(true);
-    const user = isRegisterMode
-      ? await api.register({ email, username, password })
-      : await api.login({ email, password });
-    setCurrentUser(user);
-    clearStatus();
-    list.innerHTML = '<p id="loading-msg" class="empty-msg">Loading intervals...</p>';
-    await loadShareGroups();
-    await loadIntervals();
+    if (isRegisterMode) {
+      const user = await api.register({ email, username, password });
+      setCurrentUser(user);
+      clearStatus();
+      list.innerHTML = '<p id="loading-msg" class="empty-msg">Loading intervals...</p>';
+      await loadShareGroups();
+      await loadIntervals();
+    } else if (isMagicLinkEnabled) {
+      await api.requestLoginLink({ email });
+      showAuthError('If that email has an account, a sign-in link is on its way.');
+    } else {
+      const user = await api.login({ email, password });
+      setCurrentUser(user);
+      clearStatus();
+      list.innerHTML = '<p id="loading-msg" class="empty-msg">Loading intervals...</p>';
+      await loadShareGroups();
+      await loadIntervals();
+    }
   } catch (err) {
     showAuthError(err.message);
   } finally {
@@ -1182,6 +1198,7 @@ async function initPrivateApp() {
   setAuthMode(false);
   const params = new URLSearchParams(window.location.search);
   const authErrorMessage = params.get('auth_error');
+  const loginToken = params.get('login_token');
 
   try {
     const build = await api.version();
@@ -1192,20 +1209,30 @@ async function initPrivateApp() {
 
   try {
     const providers = await api.providers();
+    isMagicLinkEnabled = !!providers.magic_link_enabled;
     authOAuth.classList.toggle('hidden', !providers.github_enabled);
+    setAuthMode(false);
   } catch {
     authOAuth.classList.add('hidden');
+    isMagicLinkEnabled = false;
+    setAuthMode(false);
   }
 
   try {
-    const user = await api.me();
+    const user = loginToken ? await api.consumeLoginLink({ token: loginToken }) : await api.me();
     setCurrentUser(user);
+    if (loginToken) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
     await loadShareGroups();
     await loadIntervals();
   } catch (err) {
     setCurrentUser(null);
     authView.classList.remove('hidden');
-    if (authErrorMessage) {
+    if (loginToken) {
+      showAuthError('This sign-in link is invalid or expired.');
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (authErrorMessage) {
       showAuthError(authErrorMessage);
       window.history.replaceState({}, '', window.location.pathname);
     } else if (err.status !== 401) {

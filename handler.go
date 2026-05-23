@@ -28,6 +28,7 @@ type handler struct {
 	db           *sql.DB
 	cookieSecure bool
 	githubOAuth  githubOAuthConfig
+	magicLinks   magicLinkConfig
 	httpClient   *http.Client
 	authLimiter  *authRateLimiter
 }

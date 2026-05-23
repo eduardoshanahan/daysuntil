@@ -16,6 +16,10 @@ func main() {
 	}
 
 	githubOAuth := githubConfigFromEnv()
+	magicLinks, err := magicLinkConfigFromEnv()
+	if err != nil {
+		log.Fatalf("magic link config: %v", err)
+	}
 	cookieSecure, err := cookieSecureFromEnv(githubOAuth)
 	if err != nil {
 		log.Fatalf("cookie security config: %v", err)
@@ -35,6 +39,7 @@ func main() {
 		db:           db,
 		cookieSecure: cookieSecure,
 		githubOAuth:  githubOAuth,
+		magicLinks:   magicLinks,
 		httpClient:   http.DefaultClient,
 		authLimiter:  newAuthRateLimiter(),
 	}

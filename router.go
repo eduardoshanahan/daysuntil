@@ -19,6 +19,8 @@ func newRouter(h *handler) http.Handler {
 		r.Get("/version", h.appVersion)
 		r.With(authRateLimitMiddleware(h.authLimiter, authActionRegister)).Post("/register", h.register)
 		r.With(authRateLimitMiddleware(h.authLimiter, authActionLogin)).Post("/login", h.login)
+		r.With(authRateLimitMiddleware(h.authLimiter, authActionMagicLink)).Post("/login/link", h.requestMagicLink)
+		r.Post("/login/link/consume", h.consumeMagicLink)
 		r.Post("/logout", h.logout)
 		r.Get("/me", h.currentUser)
 		r.Delete("/me", h.deleteAccount)

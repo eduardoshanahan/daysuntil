@@ -67,6 +67,7 @@
     dateNext: document.getElementById('date-next'),
     authForm: document.getElementById('auth-form'),
     authUsernameRow: document.getElementById('auth-username-row'),
+    authPasswordRow: document.getElementById('auth-password-row'),
     authEmail: document.getElementById('auth-email'),
     authUsername: document.getElementById('auth-username'),
     authPassword: document.getElementById('auth-password'),

@@ -34,6 +34,8 @@
     updateProfile: data => apiFetch('/api/me/profile', { method: 'PUT', body: JSON.stringify(data) }),
     register: data => apiFetch('/api/register', { method: 'POST', body: JSON.stringify(data) }),
     login: data => apiFetch('/api/login', { method: 'POST', body: JSON.stringify(data) }),
+    requestLoginLink: data => apiFetch('/api/login/link', { method: 'POST', body: JSON.stringify(data) }),
+    consumeLoginLink: data => apiFetch('/api/login/link/consume', { method: 'POST', body: JSON.stringify(data) }),
     logout: () => apiFetch('/api/logout', { method: 'POST' }),
     list: () => apiFetch('/api/intervals'),
     create: data => apiFetch('/api/intervals', { method: 'POST', body: JSON.stringify(data) }),

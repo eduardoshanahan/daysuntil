@@ -11,11 +11,13 @@ import (
 )
 
 const (
-	authRateLimitWindow       = time.Minute
-	loginRateLimitRequests    = 10
-	registerRateLimitRequests = 5
-	authActionLogin           = "login"
-	authActionRegister        = "register"
+	authRateLimitWindow        = time.Minute
+	loginRateLimitRequests     = 10
+	registerRateLimitRequests  = 5
+	magicLinkRateLimitRequests = 5
+	authActionLogin            = "login"
+	authActionRegister         = "register"
+	authActionMagicLink        = "magic_link"
 )
 
 type authRatePolicy struct {
@@ -45,6 +47,10 @@ func newAuthRateLimiter() *authRateLimiter {
 			},
 			authActionRegister: {
 				limit:  registerRateLimitRequests,
+				window: authRateLimitWindow,
+			},
+			authActionMagicLink: {
+				limit:  magicLinkRateLimitRequests,
 				window: authRateLimitWindow,
 			},
 		},

@@ -24,6 +24,7 @@ const (
 	sessionCookieName = "daysuntil_session"
 	oauthStateCookie  = "daysuntil_oauth_state"
 	sessionTTL        = 30 * 24 * time.Hour
+	magicLinkTTL      = 15 * time.Minute
 )
 
 var errUserNotFound = errors.New("user not found")
@@ -51,6 +52,14 @@ type loginCredentials struct {
 	Password string `json:"password"`
 }
 
+type magicLinkRequest struct {
+	Email string `json:"email"`
+}
+
+type magicLinkConsumeRequest struct {
+	Token string `json:"token"`
+}
+
 type githubOAuthConfig struct {
 	ClientID     string
 	ClientSecret string
@@ -61,7 +70,8 @@ type githubOAuthConfig struct {
 }
 
 type authProvidersResponse struct {
-	GitHubEnabled bool `json:"github_enabled"`
+	GitHubEnabled    bool `json:"github_enabled"`
+	MagicLinkEnabled bool `json:"magic_link_enabled"`
 }
 
 type githubOAuthUser struct {
@@ -137,6 +147,28 @@ func initAuthDB(db *sql.DB) error {
 	}
 
 	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS login_tokens (
+		id         TEXT PRIMARY KEY,
+		user_id    INTEGER NOT NULL,
+		expires_at TEXT NOT NULL,
+		used_at    TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+	)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_login_tokens_user_id ON login_tokens(user_id)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_login_tokens_expires_at ON login_tokens(expires_at)`)
 	if err != nil {
 		return err
 	}
@@ -313,8 +345,11 @@ func authenticateUser(db *sql.DB, creds loginCredentials) (User, error) {
 	return user, nil
 }
 
-func authProviders(config githubOAuthConfig) authProvidersResponse {
-	return authProvidersResponse{GitHubEnabled: config.Enabled()}
+func authProviders(github githubOAuthConfig, magic magicLinkConfig) authProvidersResponse {
+	return authProvidersResponse{
+		GitHubEnabled:    github.Enabled(),
+		MagicLinkEnabled: magic.Enabled(),
+	}
 }
 
 func githubConfigFromEnv() githubOAuthConfig {
@@ -384,6 +419,32 @@ func findUserByProvider(db *sql.DB, provider, providerUserID string) (User, erro
 		}
 		return User{}, err
 	}
+	return user, nil
+}
+
+func findUserByEmail(db *sql.DB, email string) (User, error) {
+	email = normalizeEmail(email)
+	if email == "" {
+		return User{}, errUserNotFound
+	}
+
+	var user User
+	err := db.QueryRow(
+		`SELECT id, username, public_slug, display_name FROM users WHERE email=?`,
+		email,
+	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return User{}, errUserNotFound
+		}
+		return User{}, err
+	}
+
+	user.PublicSlug, err = ensurePublicSlug(db, user.ID, user.PublicSlug)
+	if err != nil {
+		return User{}, err
+	}
+
 	return user, nil
 }
 
@@ -515,6 +576,37 @@ func createSession(db *sql.DB, userID int64) (string, time.Time, error) {
 	return rawToken, expiresAt, nil
 }
 
+func createMagicLinkToken(db *sql.DB, userID int64) (string, time.Time, error) {
+	rawToken, err := randomToken(32)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	expiresAt := time.Now().UTC().Add(magicLinkTTL)
+	tx, err := db.Begin()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM login_tokens WHERE user_id=?`, userID); err != nil {
+		return "", time.Time{}, err
+	}
+
+	if _, err := tx.Exec(
+		`INSERT INTO login_tokens (id, user_id, expires_at, used_at, created_at) VALUES (?, ?, ?, '', ?)`,
+		hashToken(rawToken), userID, expiresAt.Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339),
+	); err != nil {
+		return "", time.Time{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", time.Time{}, err
+	}
+
+	return rawToken, expiresAt, nil
+}
+
 func deleteSession(db *sql.DB, rawToken string) error {
 	if strings.TrimSpace(rawToken) == "" {
 		return nil
@@ -579,6 +671,79 @@ func authenticatedUser(db *sql.DB, r *http.Request) (User, error) {
 		return User{}, ErrNotFound
 	}
 	return findUserBySession(db, cookie.Value)
+}
+
+func consumeMagicLinkToken(db *sql.DB, rawToken string) (User, error) {
+	if strings.TrimSpace(rawToken) == "" {
+		return User{}, ErrNotFound
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return User{}, err
+	}
+	defer tx.Rollback()
+
+	var (
+		user      User
+		expiresAt string
+		usedAt    string
+	)
+	err = tx.QueryRow(
+		`SELECT u.id, u.username, u.public_slug, u.display_name, lt.expires_at, lt.used_at
+		FROM login_tokens lt
+		JOIN users u ON u.id = lt.user_id
+		WHERE lt.id=?`,
+		hashToken(rawToken),
+	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &expiresAt, &usedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return User{}, ErrNotFound
+		}
+		return User{}, err
+	}
+
+	if strings.TrimSpace(usedAt) != "" {
+		return User{}, ErrNotFound
+	}
+
+	expiresTime, err := time.Parse(time.RFC3339, expiresAt)
+	if err != nil {
+		return User{}, err
+	}
+	if !expiresTime.After(time.Now().UTC()) {
+		if _, err := tx.Exec(`DELETE FROM login_tokens WHERE id=?`, hashToken(rawToken)); err != nil {
+			return User{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return User{}, err
+		}
+		return User{}, ErrNotFound
+	}
+
+	result, err := tx.Exec(`UPDATE login_tokens SET used_at=? WHERE id=? AND used_at=''`, time.Now().UTC().Format(time.RFC3339), hashToken(rawToken))
+	if err != nil {
+		return User{}, err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return User{}, err
+	}
+	if rowsAffected != 1 {
+		return User{}, ErrNotFound
+	}
+
+	if err := tx.Commit(); err != nil {
+		return User{}, err
+	}
+
+	user.PublicSlug, err = ensurePublicSlug(db, user.ID, user.PublicSlug)
+	if err != nil {
+		return User{}, err
+	}
+
+	return user, nil
 }
 
 func userFromContext(ctx context.Context) (User, error) {

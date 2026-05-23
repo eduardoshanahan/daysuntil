@@ -66,6 +66,75 @@ func (h *handler) login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, user)
 }
 
+func (h *handler) requestMagicLink(w http.ResponseWriter, r *http.Request) {
+	if !h.magicLinks.Enabled() {
+		http.Error(w, "magic link sign-in is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req magicLinkRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		return
+	}
+
+	email, err := validateEmail(req.Email)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	user, err := findUserByEmail(h.db, email)
+	if err != nil {
+		if errors.Is(err, errUserNotFound) {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		log.Printf("auth: magic link lookup failed: %v", err)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	token, _, err := createMagicLinkToken(h.db, user.ID)
+	if err != nil {
+		log.Printf("auth: magic link token creation failed for user_id=%d: %v", user.ID, err)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	if err := h.magicLinks.sendLoginLink(email, token); err != nil {
+		log.Printf("auth: magic link send failed for user_id=%d: %v", user.ID, err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) consumeMagicLink(w http.ResponseWriter, r *http.Request) {
+	if !h.magicLinks.Enabled() {
+		http.Error(w, "magic link sign-in is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req magicLinkConsumeRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		return
+	}
+
+	user, err := consumeMagicLinkToken(h.db, req.Token)
+	if err != nil {
+		http.Error(w, "invalid or expired sign-in link", http.StatusUnauthorized)
+		return
+	}
+
+	token, expiresAt, err := createSession(h.db, user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	setSessionCookie(w, token, expiresAt, h.cookieSecure)
+	writeJSON(w, user)
+}
+
 func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie(sessionCookieName)
 	if err == nil {
@@ -132,7 +201,7 @@ func (h *handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) authProviders(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, authProviders(h.githubOAuth))
+	writeJSON(w, authProviders(h.githubOAuth, h.magicLinks))
 }
 
 func (h *handler) githubOAuthStart(w http.ResponseWriter, r *http.Request) {

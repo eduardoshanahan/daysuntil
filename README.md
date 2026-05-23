@@ -4,7 +4,7 @@ A small homelab web application to track named time intervals. For each interval
 
 ## Features
 
-- Local email/password accounts with separate public usernames
+- Local accounts with password-based registration and optional email magic-link sign-in
 - Human-readable share-group links generated from a word-based slug
 - Optional GitHub OAuth alongside local login
 - Basic in-memory rate limiting on login and registration endpoints
@@ -45,12 +45,24 @@ The Compose file forwards these runtime variables into the app:
 - `GITHUB_CLIENT_ID`: GitHub OAuth App client ID
 - `GITHUB_CLIENT_SECRET`: GitHub OAuth App client secret
 - `COOKIE_SECURE`: optional override for cookie security. Leave unset for auto mode. In auto mode, cookies become secure when `BASE_URL` or `GITHUB_CALLBACK_URL` uses `https://`
+- `SMTP_HOST`: SMTP hostname for magic-link email delivery
+- `SMTP_PORT`: SMTP port for magic-link email delivery
+- `SMTP_FROM`: From address for magic-link email delivery
+- `SMTP_USERNAME`: optional SMTP auth username
+- `SMTP_PASSWORD`: optional SMTP auth password
 
 GitHub login is enabled only when these are set:
 
 - `GITHUB_CLIENT_ID`
 - `GITHUB_CLIENT_SECRET`
 - either `BASE_URL` or `GITHUB_CALLBACK_URL`
+
+Magic-link login is enabled only when these are set:
+
+- `BASE_URL`
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_FROM`
 
 Example:
 

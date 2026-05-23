@@ -186,6 +186,23 @@ func TestInitDBAddsEmailColumnToLegacyUsersSchema(t *testing.T) {
 	}
 }
 
+func TestInitDBCreatesLoginTokensTable(t *testing.T) {
+	db := openTestDB(t)
+
+	if err := initDB(db); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	var name string
+	err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='login_tokens'`).Scan(&name)
+	if err != nil {
+		t.Fatalf("expected login_tokens table: %v", err)
+	}
+	if name != "login_tokens" {
+		t.Fatalf("expected login_tokens table, got %q", name)
+	}
+}
+
 func TestValidateIntervalRejectsEndDateBeforeStartDate(t *testing.T) {
 	db := openTestDB(t)
 	if err := initDB(db); err != nil {
@@ -814,6 +831,100 @@ func TestOAuthAccountCannotUseLocalPasswordLogin(t *testing.T) {
 	}
 	if strings.TrimSpace(rec.Body.String()) != "invalid email or password" {
 		t.Fatalf("expected generic auth failure, got %q", strings.TrimSpace(rec.Body.String()))
+	}
+}
+
+func TestMagicLinkRequestReturnsGenericSuccessForUnknownEmail(t *testing.T) {
+	sent := false
+	_, router := newTestServerWithHandler(t, &handler{
+		authLimiter: newAuthRateLimiter(),
+		magicLinks: magicLinkConfig{
+			BaseURL:  "http://localhost:8080",
+			From:     "noreply@example.com",
+			SMTPHost: "smtp.example.com",
+			SMTPPort: "587",
+			send: func(email, rawToken string) error {
+				sent = true
+				return nil
+			},
+		},
+	})
+
+	rec := performRequest(t, router, http.MethodPost, "/api/login/link", `{"email":"nobody@example.com"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if sent {
+		t.Fatal("expected no email to be sent for unknown account")
+	}
+}
+
+func TestMagicLinkRequestStoresHashedTokenAndConsumeCreatesSession(t *testing.T) {
+	var (
+		sentEmail string
+		rawToken  string
+	)
+	db, router := newTestServerWithHandler(t, &handler{
+		authLimiter: newAuthRateLimiter(),
+		magicLinks: magicLinkConfig{
+			BaseURL:  "http://localhost:8080",
+			From:     "noreply@example.com",
+			SMTPHost: "smtp.example.com",
+			SMTPPort: "587",
+			send: func(email, token string) error {
+				sentEmail = email
+				rawToken = token
+				return nil
+			},
+		},
+	})
+
+	registerUser(t, router, "alice@example.com", "alice", "password123")
+
+	requestRec := performRequest(t, router, http.MethodPost, "/api/login/link", `{"email":"alice@example.com"}`)
+	if requestRec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d (%s)", requestRec.Code, requestRec.Body.String())
+	}
+	if sentEmail != "alice@example.com" {
+		t.Fatalf("expected magic link email to be sent to alice@example.com, got %q", sentEmail)
+	}
+	if rawToken == "" {
+		t.Fatal("expected raw magic link token to be captured")
+	}
+
+	var storedID string
+	var usedAt string
+	if err := db.QueryRow(`SELECT id, used_at FROM login_tokens`).Scan(&storedID, &usedAt); err != nil {
+		t.Fatalf("query login token: %v", err)
+	}
+	if storedID == rawToken {
+		t.Fatal("expected stored login token to be hashed, not raw")
+	}
+	if strings.TrimSpace(usedAt) != "" {
+		t.Fatalf("expected unused token, got used_at=%q", usedAt)
+	}
+
+	consumeRec := performRequest(t, router, http.MethodPost, "/api/login/link/consume", `{"token":"`+rawToken+`"}`)
+	if consumeRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 consuming magic link, got %d (%s)", consumeRec.Code, consumeRec.Body.String())
+	}
+
+	cookies := consumeRec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("expected session cookie after consuming magic link")
+	}
+
+	me := performRequest(t, router, http.MethodGet, "/api/me", "", cookies[0])
+	if me.Code != http.StatusOK {
+		t.Fatalf("expected 200 for authenticated /api/me, got %d (%s)", me.Code, me.Body.String())
+	}
+
+	reuseRec := performRequest(t, router, http.MethodPost, "/api/login/link/consume", `{"token":"`+rawToken+`"}`)
+	if reuseRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 reusing magic link, got %d (%s)", reuseRec.Code, reuseRec.Body.String())
+	}
+	if strings.TrimSpace(reuseRec.Body.String()) != "invalid or expired sign-in link" {
+		t.Fatalf("expected generic consume failure, got %q", strings.TrimSpace(reuseRec.Body.String()))
 	}
 }
 
