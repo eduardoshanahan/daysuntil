@@ -4,6 +4,10 @@ A homelab web application for tracking named time intervals. You define a start 
 
 Intervals are private by default. To share a set of intervals publicly, create a share group and assign intervals to it. Each share group gets a human-readable link (`/g/forest-harbor-otter`) that shows only the intervals in that group.
 
+![Dashboard showing three intervals with progress bars](docs/screenshots/dashboard.png)
+
+![Public share group page](docs/screenshots/share-group.png)
+
 ## Features
 
 - Local accounts with password-based registration and optional email magic-link sign-in
@@ -17,6 +21,8 @@ Intervals are private by default. To share a set of intervals publicly, create a
 - Status badge: upcoming / in progress / ended
 - Responsive layout — works on desktop and mobile
 - Data persisted in SQLite
+
+![Login page](docs/screenshots/login.png)
 
 ## Accounts
 
