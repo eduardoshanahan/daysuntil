@@ -1,6 +1,8 @@
 # DaysUntil
 
-A small homelab web application to track named time intervals. For each interval it shows how many days have elapsed, how many remain, and a visual progress bar.
+A homelab web application for tracking named time intervals. You define a start date and an end date, give the interval a name — "Summer holiday", "House renovation", "Q3" — and the app shows how many days have elapsed, how many remain, and a visual progress bar.
+
+Intervals are private by default. To share a set of intervals publicly, create a share group and assign intervals to it. Each share group gets a human-readable link (`/g/forest-harbor-otter`) that shows only the intervals in that group.
 
 ## Features
 
@@ -15,6 +17,16 @@ A small homelab web application to track named time intervals. For each interval
 - Status badge: upcoming / in progress / ended
 - Responsive layout — works on desktop and mobile
 - Data persisted in SQLite
+
+## Accounts
+
+Registration is open — anyone who can reach the app can create an account. There is no admin approval step and no invite system. If you are deploying this on a public URL, plan accordingly.
+
+Three sign-in methods are available, and they can be combined:
+
+- **Email + password** — always available; no configuration required
+- **Magic link** — passwordless sign-in via email; requires SMTP configuration
+- **GitHub OAuth** — requires a GitHub OAuth App and the relevant environment variables
 
 ## Running
 
