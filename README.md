@@ -176,8 +176,6 @@ Do not log:
 
 Use high-level operational logs instead, and prefer internal user IDs over email addresses or usernames when possible.
 
-Detailed guidance is documented in [SECURITY_LOGGING.md](SECURITY_LOGGING.md).
-
 ### Useful dev tools
 
 The Nix dev shell also includes a few local debugging tools:
