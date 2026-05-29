@@ -1,3 +1,5 @@
 daysuntil
 *.db
 .direnv/
+node_modules/
+package-lock.json
