@@ -9,7 +9,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
+      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-bundle.crt
 
     steps:
       - uses: actions/checkout@v4
@@ -24,9 +24,9 @@ jobs:
       - name: Inject homelab CA into BuildKit
         run: |
           container=$(docker ps --format '{{.Names}}' | grep buildx_buildkit | head -1)
-          docker cp /etc/ssl/certs/ca-certificates.crt "$container:/tmp/homelab-ca.crt"
-          docker exec "$container" sh -c \
-            'cat /tmp/homelab-ca.crt >> /etc/ssl/certs/ca-certificates.crt'
+          docker exec -i "$container" sh -c \
+            'cat >> /etc/ssl/certs/ca-certificates.crt' \
+            < /etc/ssl/certs/ca-bundle.crt
 
       - name: Log in to Gitea registry
         uses: docker/login-action@v3
