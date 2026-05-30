@@ -96,7 +96,7 @@
 }
 
 .day-label.past { color: var(--text-muted); text-align: right; }
-.day-label.left { color: var(--accent); text-align: left; }
+.day-label.left { color: var(--card-color); text-align: left; }
 
 .bar-track {
   height: 10px;
