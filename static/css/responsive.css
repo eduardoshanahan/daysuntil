@@ -13,6 +13,10 @@
     display: none;
   }
 
+  .help-link {
+    display: none;
+  }
+
   .user-badge {
     display: none;
   }

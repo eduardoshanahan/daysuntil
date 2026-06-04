@@ -33,6 +33,9 @@ func newRouter(h *handler) http.Handler {
 	r.Get("/api/oauth/github/start", h.githubOAuthStart)
 	r.Get("/api/oauth/github/callback", h.githubOAuthCallback)
 	r.Get("/g/{groupSlug}", servePublicGroupApp)
+	r.Get("/help", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "static/help.html")
+	})
 
 	r.Route("/api/intervals", func(r chi.Router) {
 		r.Use(authMiddleware(h))

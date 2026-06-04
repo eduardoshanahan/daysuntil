@@ -97,6 +97,23 @@ header #btn-add {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.help-link {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  text-decoration: none;
+  margin-left: 0.35rem;
+}
+
+.help-link:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
 #app-view {
   width: 100%;
 }
