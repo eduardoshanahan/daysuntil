@@ -15,6 +15,8 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - Mobile hamburger menu in the header with per-card overflow menus for touch devices
 - Interval progress refreshes automatically at midnight without a page reload
 - Incremental build number in the version label for non-tagged CI builds
+- Email verification for password registration — when SMTP is configured, new accounts must verify their email before first sign-in; magic link and GitHub OAuth accounts are auto-verified
+- `/help` page with user-facing documentation and screenshots, linked from the header
 
 ### Changed
 
@@ -22,6 +24,7 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - Public sharing routes moved from `/p/{username}` to `/g/{groupSlug}` via share groups
 - Share-group slugs use three words plus a five-character base36 suffix for stronger uniqueness
 - Account deletion available from the account settings panel
+- Auth rate-limit buckets persisted to SQLite so state survives container restarts
 
 ### Fixed
 
@@ -35,7 +38,9 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 - Cookie `Secure` flag auto-enables when `BASE_URL` or `GITHUB_CALLBACK_URL` uses `https://`
 - Rate limiting on login and registration endpoints with `429` and `Retry-After` responses
+- Rate limiting on public share-group lookup endpoint (60 req/min per IP)
 - Security headers added: `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`
+- HSTS (`Strict-Transport-Security`) header emitted on HTTPS deployments
 - Query strings stripped from request logs, preventing OAuth `code` and `state` leakage
 - Auth failure responses normalized to prevent email enumeration
 - HTTP server read, write, header, and idle timeouts now configured explicitly

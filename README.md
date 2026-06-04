@@ -13,7 +13,7 @@ Intervals are private by default. To share a set of intervals publicly, create a
 - Local accounts with password-based registration and optional email magic-link sign-in
 - Human-readable share-group links generated from a word-based slug
 - Optional GitHub OAuth alongside local login
-- Basic in-memory rate limiting on login and registration endpoints
+- Rate limiting on auth endpoints and public share-group lookups; buckets persisted to SQLite across restarts
 - Add, edit, and delete named intervals (start date → end date)
 - Create share groups and assign intervals to them
 - Progress bar showing current position within the interval
@@ -30,9 +30,9 @@ Registration is open — anyone who can reach the app can create an account. The
 
 Three sign-in methods are available, and they can be combined:
 
-- **Email + password** — always available; no configuration required
-- **Magic link** — passwordless sign-in via email; requires SMTP configuration
-- **GitHub OAuth** — requires a GitHub OAuth App and the relevant environment variables
+- **Email + password** — always available; no configuration required. When SMTP is configured, new accounts require email verification before first sign-in.
+- **Magic link** — passwordless sign-in via email; requires SMTP configuration. Accounts created this way are auto-verified.
+- **GitHub OAuth** — requires a GitHub OAuth App and the relevant environment variables. Accounts created this way are auto-verified.
 
 ## Running
 
