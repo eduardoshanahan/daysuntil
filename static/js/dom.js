@@ -80,5 +80,6 @@
     authSubtitle: document.getElementById('auth-subtitle'),
     authOAuth: document.getElementById('auth-oauth'),
     authGithub: document.getElementById('auth-github'),
+    authResendVerification: document.getElementById('auth-resend-verification'),
   };
 })();

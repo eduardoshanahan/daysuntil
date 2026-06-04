@@ -41,7 +41,7 @@ func main() {
 		githubOAuth:  githubOAuth,
 		magicLinks:   magicLinks,
 		httpClient:   http.DefaultClient,
-		authLimiter:  newAuthRateLimiter(),
+		authLimiter:  newAuthRateLimiter(db),
 	}
 
 	r := newRouter(h)

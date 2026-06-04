@@ -22,6 +22,7 @@ const {
   authOAuth,
   authPassword,
   authPasswordRow,
+  authResendVerification,
   authSubmit,
   authSubtitle,
   authSwitch,
@@ -622,6 +623,7 @@ function showAuthError(message) {
 function clearAuthError() {
   authError.textContent = '';
   authError.classList.add('hidden');
+  authResendVerification.classList.add('hidden');
 }
 
 function setAuthMode(registerMode) {
@@ -972,6 +974,20 @@ authSwitch.addEventListener('click', () => {
     authEmail.focus();
   }
 });
+authResendVerification.addEventListener('click', async () => {
+  const email = authResendVerification.dataset.email || authEmail.value.trim();
+  if (!email) return;
+  authResendVerification.disabled = true;
+  try {
+    await api.resendVerification({ email });
+    showAuthError('Verification email sent. Check your inbox.');
+    authResendVerification.classList.add('hidden');
+  } catch (err) {
+    showAuthError(err.message);
+  } finally {
+    authResendVerification.disabled = false;
+  }
+});
 overlay.addEventListener('click', event => {
   if (event.target === overlay) closeModal();
 });
@@ -1055,8 +1071,12 @@ authForm.addEventListener('submit', async event => {
   try {
     setAuthSubmitting(true);
     if (isRegisterMode) {
-      const user = await api.register({ email, username, password });
-      setCurrentUser(user);
+      const result = await api.register({ email, username, password });
+      if (!result || !result.id) {
+        showAuthError(result?.message || 'Check your email to verify your account before signing in.');
+        return;
+      }
+      setCurrentUser(result);
       clearStatus();
       list.innerHTML = '<p id="loading-msg" class="empty-msg">Loading intervals...</p>';
       await loadShareGroups();
@@ -1073,7 +1093,13 @@ authForm.addEventListener('submit', async event => {
       await loadIntervals();
     }
   } catch (err) {
-    showAuthError(err.message);
+    if (err.status === 403) {
+      showAuthError(err.message);
+      authResendVerification.classList.remove('hidden');
+      authResendVerification.dataset.email = email;
+    } else {
+      showAuthError(err.message);
+    }
   } finally {
     setAuthSubmitting(false);
   }
@@ -1199,6 +1225,7 @@ async function initPrivateApp() {
   const params = new URLSearchParams(window.location.search);
   const authErrorMessage = params.get('auth_error');
   const loginToken = params.get('login_token');
+  const verifyToken = params.get('verify_token');
 
   try {
     const build = await api.version();
@@ -1219,9 +1246,16 @@ async function initPrivateApp() {
   }
 
   try {
-    const user = loginToken ? await api.consumeLoginLink({ token: loginToken }) : await api.me();
-    setCurrentUser(user);
+    let user;
     if (loginToken) {
+      user = await api.consumeLoginLink({ token: loginToken });
+    } else if (verifyToken) {
+      user = await api.verifyEmail({ token: verifyToken });
+    } else {
+      user = await api.me();
+    }
+    setCurrentUser(user);
+    if (loginToken || verifyToken) {
       window.history.replaceState({}, '', window.location.pathname);
     }
     await loadShareGroups();
@@ -1231,6 +1265,10 @@ async function initPrivateApp() {
     authView.classList.remove('hidden');
     if (loginToken) {
       showAuthError('This sign-in link is invalid or expired.');
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (verifyToken) {
+      showAuthError('This verification link is invalid or expired. Request a new one below.');
+      authResendVerification.classList.remove('hidden');
       window.history.replaceState({}, '', window.location.pathname);
     } else if (authErrorMessage) {
       showAuthError(authErrorMessage);

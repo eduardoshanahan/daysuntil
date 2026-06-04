@@ -30,7 +30,7 @@ func openTestDB(t *testing.T) *sql.DB {
 
 func newTestServer(t *testing.T) (*sql.DB, http.Handler) {
 	t.Helper()
-	return newTestServerWithHandler(t, &handler{authLimiter: newAuthRateLimiter()})
+	return newTestServerWithHandler(t, &handler{authLimiter: newAuthRateLimiter(nil)})
 }
 
 func newTestServerWithHandler(t *testing.T, h *handler) (*sql.DB, http.Handler) {
@@ -714,7 +714,7 @@ func TestMoveIntervalNormalizesLegacyZeroPositions(t *testing.T) {
 }
 
 func TestLoginRateLimitReturnsTooManyRequests(t *testing.T) {
-	limiter := newAuthRateLimiter()
+	limiter := newAuthRateLimiter(nil)
 	limiter.now = func() time.Time {
 		return time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	}
@@ -740,7 +740,7 @@ func TestLoginRateLimitReturnsTooManyRequests(t *testing.T) {
 }
 
 func TestRegisterRateLimitReturnsTooManyRequests(t *testing.T) {
-	limiter := newAuthRateLimiter()
+	limiter := newAuthRateLimiter(nil)
 	limiter.now = func() time.Time {
 		return time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	}
@@ -765,7 +765,7 @@ func TestRegisterRateLimitReturnsTooManyRequests(t *testing.T) {
 }
 
 func TestLoginAndRegisterRateLimitsAreIndependent(t *testing.T) {
-	limiter := newAuthRateLimiter()
+	limiter := newAuthRateLimiter(nil)
 	limiter.now = func() time.Time {
 		return time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	}
@@ -837,7 +837,7 @@ func TestOAuthAccountCannotUseLocalPasswordLogin(t *testing.T) {
 func TestMagicLinkRequestReturnsGenericSuccessForUnknownEmail(t *testing.T) {
 	sent := false
 	_, router := newTestServerWithHandler(t, &handler{
-		authLimiter: newAuthRateLimiter(),
+		authLimiter: newAuthRateLimiter(nil),
 		magicLinks: magicLinkConfig{
 			BaseURL:  "http://localhost:8080",
 			From:     "noreply@example.com",
@@ -865,7 +865,7 @@ func TestMagicLinkRequestStoresHashedTokenAndConsumeCreatesSession(t *testing.T)
 		rawToken  string
 	)
 	db, router := newTestServerWithHandler(t, &handler{
-		authLimiter: newAuthRateLimiter(),
+		authLimiter: newAuthRateLimiter(nil),
 		magicLinks: magicLinkConfig{
 			BaseURL:  "http://localhost:8080",
 			From:     "noreply@example.com",
@@ -879,7 +879,15 @@ func TestMagicLinkRequestStoresHashedTokenAndConsumeCreatesSession(t *testing.T)
 		},
 	})
 
-	registerUser(t, router, "alice@example.com", "alice", "password123")
+	// Register with SMTP configured — returns 202 (verification email sent via stub).
+	// Directly mark the user verified to avoid coupling this test to the email verification flow.
+	regRec := performRequest(t, router, http.MethodPost, "/api/register", `{"email":"alice@example.com","username":"alice","password":"password123"}`)
+	if regRec.Code != http.StatusAccepted {
+		t.Fatalf("register: expected 202, got %d (%s)", regRec.Code, regRec.Body.String())
+	}
+	if _, err := db.Exec(`UPDATE users SET email_verified=1 WHERE email='alice@example.com'`); err != nil {
+		t.Fatalf("mark verified: %v", err)
+	}
 
 	requestRec := performRequest(t, router, http.MethodPost, "/api/login/link", `{"email":"alice@example.com"}`)
 	if requestRec.Code != http.StatusNoContent {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -26,6 +27,26 @@ func (h *handler) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.magicLinks.Enabled() {
+		token, _, err := createEmailVerificationToken(h.db, user.ID)
+		if err != nil {
+			log.Printf("auth: verification token creation failed for user_id=%d: %v", user.ID, err)
+			http.Error(w, "account created but verification email could not be sent", http.StatusInternalServerError)
+			return
+		}
+		if err := h.magicLinks.sendVerificationEmail(creds.Email, token); err != nil {
+			log.Printf("auth: verification email send failed for user_id=%d: %v", user.ID, err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Check your email to verify your account before signing in."})
+		return
+	}
+
+	// SMTP not configured — auto-verify and create session (local dev or no-email deployments)
+	if err := markEmailVerified(h.db, user.ID); err != nil {
+		log.Printf("auth: auto-verify failed for user_id=%d: %v", user.ID, err)
+	}
 	token, expiresAt, err := createSession(h.db, user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -44,6 +65,10 @@ func (h *handler) login(w http.ResponseWriter, r *http.Request) {
 
 	user, err := authenticateUser(h.db, creds)
 	if err != nil {
+		if errors.Is(err, errEmailNotVerified) {
+			http.Error(w, "Please verify your email before signing in.", http.StatusForbidden)
+			return
+		}
 		switch {
 		case errors.Is(err, errUserNotFound):
 			log.Printf("auth: login failed: no account found") // TODO: remove once login bug is resolved
@@ -123,6 +148,10 @@ func (h *handler) consumeMagicLink(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "invalid or expired sign-in link", http.StatusUnauthorized)
 		return
+	}
+
+	if err := markEmailVerified(h.db, user.ID); err != nil {
+		log.Printf("auth: magic link verify failed for user_id=%d: %v", user.ID, err)
 	}
 
 	token, expiresAt, err := createSession(h.db, user.ID)
@@ -259,6 +288,10 @@ func (h *handler) githubOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := markEmailVerified(h.db, user.ID); err != nil {
+		log.Printf("auth: github verify failed for user_id=%d: %v", user.ID, err)
+	}
+
 	sessionToken, expiresAt, err := createSession(h.db, user.ID)
 	if err != nil {
 		http.Redirect(w, r, "/?auth_error="+url.QueryEscape("Session creation failed."), http.StatusFound)
@@ -267,4 +300,80 @@ func (h *handler) githubOAuthCallback(w http.ResponseWriter, r *http.Request) {
 
 	setSessionCookie(w, sessionToken, expiresAt, h.cookieSecure)
 	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+func (h *handler) verifyEmail(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		return
+	}
+
+	user, err := consumeEmailVerificationToken(h.db, req.Token)
+	if err != nil {
+		http.Error(w, "invalid or expired verification link", http.StatusUnauthorized)
+		return
+	}
+
+	if err := markEmailVerified(h.db, user.ID); err != nil {
+		log.Printf("auth: mark verified failed for user_id=%d: %v", user.ID, err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	token, expiresAt, err := createSession(h.db, user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	setSessionCookie(w, token, expiresAt, h.cookieSecure)
+	writeJSON(w, user)
+}
+
+func (h *handler) resendVerification(w http.ResponseWriter, r *http.Request) {
+	if !h.magicLinks.Enabled() {
+		http.Error(w, "email is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		return
+	}
+
+	email, err := validateEmail(req.Email)
+	if err != nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	user, err := findUserByEmail(h.db, email)
+	if err != nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	var emailVerified int
+	_ = h.db.QueryRow(`SELECT email_verified FROM users WHERE id=?`, user.ID).Scan(&emailVerified)
+	if emailVerified == 1 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	token, _, err := createEmailVerificationToken(h.db, user.ID)
+	if err != nil {
+		log.Printf("auth: resend verification token failed for user_id=%d: %v", user.ID, err)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	if err := h.magicLinks.sendVerificationEmail(email, token); err != nil {
+		log.Printf("auth: resend verification email failed for user_id=%d: %v", user.ID, err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

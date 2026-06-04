@@ -21,14 +21,16 @@ import (
 )
 
 const (
-	sessionCookieName = "daysuntil_session"
-	oauthStateCookie  = "daysuntil_oauth_state"
-	sessionTTL        = 30 * 24 * time.Hour
-	magicLinkTTL      = 15 * time.Minute
+	sessionCookieName       = "daysuntil_session"
+	oauthStateCookie        = "daysuntil_oauth_state"
+	sessionTTL              = 30 * 24 * time.Hour
+	magicLinkTTL            = 15 * time.Minute
+	emailVerificationTTL    = 24 * time.Hour
 )
 
 var errUserNotFound = errors.New("user not found")
 var errWrongPassword = errors.New("wrong password")
+var errEmailNotVerified = errors.New("email not verified")
 
 type contextKey string
 
@@ -117,6 +119,21 @@ func initAuthDB(db *sql.DB) error {
 	if err := ensureUserColumn(db, "auth_provider_user_id", "ALTER TABLE users ADD COLUMN auth_provider_user_id TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+
+	emailVerifiedExists, err := tableColumnExists(db, "users", "email_verified")
+	if err != nil {
+		return err
+	}
+	if !emailVerifiedExists {
+		if _, err := db.Exec("ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+		// Mark all pre-existing users as verified — they existed before email verification was added
+		if _, err := db.Exec(`UPDATE users SET email_verified=1`); err != nil {
+			return err
+		}
+	}
+
 	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_provider_identity ON users(auth_provider, auth_provider_user_id) WHERE auth_provider <> '' AND auth_provider_user_id <> ''`)
 	if err != nil {
 		return err
@@ -169,6 +186,28 @@ func initAuthDB(db *sql.DB) error {
 	}
 
 	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_login_tokens_expires_at ON login_tokens(expires_at)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS email_verification_tokens (
+		id         TEXT PRIMARY KEY,
+		user_id    INTEGER NOT NULL,
+		expires_at TEXT NOT NULL,
+		used_at    TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+	)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user_id ON email_verification_tokens(user_id)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_expires_at ON email_verification_tokens(expires_at)`)
 	if err != nil {
 		return err
 	}
@@ -319,10 +358,11 @@ func authenticateUser(db *sql.DB, creds loginCredentials) (User, error) {
 
 	var user User
 	var passwordHash string
+	var emailVerified int
 	err := db.QueryRow(
-		`SELECT id, username, public_slug, display_name, password_hash FROM users WHERE email=?`,
+		`SELECT id, username, public_slug, display_name, password_hash, email_verified FROM users WHERE email=?`,
 		email,
-	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &passwordHash)
+	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &passwordHash, &emailVerified)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, errUserNotFound
@@ -335,6 +375,10 @@ func authenticateUser(db *sql.DB, creds loginCredentials) (User, error) {
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(creds.Password)); err != nil {
 		return user, errWrongPassword
+	}
+
+	if emailVerified == 0 {
+		return user, errEmailNotVerified
 	}
 
 	user.PublicSlug, err = ensurePublicSlug(db, user.ID, user.PublicSlug)
@@ -892,4 +936,113 @@ func randomToken(size int) (string, error) {
 func hashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+func markEmailVerified(db *sql.DB, userID int64) error {
+	_, err := db.Exec(`UPDATE users SET email_verified=1 WHERE id=?`, userID)
+	return err
+}
+
+func createEmailVerificationToken(db *sql.DB, userID int64) (string, time.Time, error) {
+	rawToken, err := randomToken(32)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	expiresAt := time.Now().UTC().Add(emailVerificationTTL)
+	tx, err := db.Begin()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM email_verification_tokens WHERE user_id=?`, userID); err != nil {
+		return "", time.Time{}, err
+	}
+
+	if _, err := tx.Exec(
+		`INSERT INTO email_verification_tokens (id, user_id, expires_at, used_at, created_at) VALUES (?, ?, ?, '', ?)`,
+		hashToken(rawToken), userID, expiresAt.Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339),
+	); err != nil {
+		return "", time.Time{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", time.Time{}, err
+	}
+
+	return rawToken, expiresAt, nil
+}
+
+func consumeEmailVerificationToken(db *sql.DB, rawToken string) (User, error) {
+	if strings.TrimSpace(rawToken) == "" {
+		return User{}, ErrNotFound
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return User{}, err
+	}
+	defer tx.Rollback()
+
+	var (
+		user      User
+		expiresAt string
+		usedAt    string
+	)
+	err = tx.QueryRow(
+		`SELECT u.id, u.username, u.public_slug, u.display_name, et.expires_at, et.used_at
+		FROM email_verification_tokens et
+		JOIN users u ON u.id = et.user_id
+		WHERE et.id=?`,
+		hashToken(rawToken),
+	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &expiresAt, &usedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return User{}, ErrNotFound
+		}
+		return User{}, err
+	}
+
+	if strings.TrimSpace(usedAt) != "" {
+		return User{}, ErrNotFound
+	}
+
+	expiresTime, err := time.Parse(time.RFC3339, expiresAt)
+	if err != nil {
+		return User{}, err
+	}
+	if !expiresTime.After(time.Now().UTC()) {
+		if _, err := tx.Exec(`DELETE FROM email_verification_tokens WHERE id=?`, hashToken(rawToken)); err != nil {
+			return User{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return User{}, err
+		}
+		return User{}, ErrNotFound
+	}
+
+	result, err := tx.Exec(`UPDATE email_verification_tokens SET used_at=? WHERE id=? AND used_at=''`, time.Now().UTC().Format(time.RFC3339), hashToken(rawToken))
+	if err != nil {
+		return User{}, err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return User{}, err
+	}
+	if rowsAffected != 1 {
+		return User{}, ErrNotFound
+	}
+
+	if err := tx.Commit(); err != nil {
+		return User{}, err
+	}
+
+	user.PublicSlug, err = ensurePublicSlug(db, user.ID, user.PublicSlug)
+	if err != nil {
+		return User{}, err
+	}
+
+	return user, nil
 }

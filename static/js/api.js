@@ -36,6 +36,8 @@
     login: data => apiFetch('/api/login', { method: 'POST', body: JSON.stringify(data) }),
     requestLoginLink: data => apiFetch('/api/login/link', { method: 'POST', body: JSON.stringify(data) }),
     consumeLoginLink: data => apiFetch('/api/login/link/consume', { method: 'POST', body: JSON.stringify(data) }),
+    verifyEmail: data => apiFetch('/api/verify-email', { method: 'POST', body: JSON.stringify(data) }),
+    resendVerification: data => apiFetch('/api/resend-verification', { method: 'POST', body: JSON.stringify(data) }),
     logout: () => apiFetch('/api/logout', { method: 'POST' }),
     list: () => apiFetch('/api/intervals'),
     create: data => apiFetch('/api/intervals', { method: 'POST', body: JSON.stringify(data) }),

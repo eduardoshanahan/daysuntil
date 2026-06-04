@@ -52,6 +52,12 @@ func (c magicLinkConfig) loginURL(rawToken string) string {
 	return c.BaseURL + "/?" + values.Encode()
 }
 
+func (c magicLinkConfig) verificationURL(rawToken string) string {
+	values := url.Values{}
+	values.Set("verify_token", rawToken)
+	return c.BaseURL + "/?" + values.Encode()
+}
+
 func (c magicLinkConfig) sendLoginLink(email, rawToken string) error {
 	if c.send != nil {
 		return c.send(email, rawToken)
@@ -73,6 +79,40 @@ func (c magicLinkConfig) sendLoginLink(email, rawToken string) error {
 		loginURL,
 		"",
 		"This link expires in 15 minutes and can only be used once.",
+		"",
+	}, "\r\n")
+
+	addr := c.SMTPHost + ":" + c.SMTPPort
+	var smtpAuth smtp.Auth
+	if c.Username != "" || c.Password != "" {
+		smtpAuth = smtp.PlainAuth("", c.Username, c.Password, c.SMTPHost)
+	}
+
+	return smtp.SendMail(addr, smtpAuth, c.From, []string{email}, []byte(message))
+}
+
+func (c magicLinkConfig) sendVerificationEmail(email, rawToken string) error {
+	if c.send != nil {
+		return c.send(email, rawToken)
+	}
+
+	if !c.Enabled() {
+		return fmt.Errorf("email is not configured")
+	}
+
+	verifyURL := c.verificationURL(rawToken)
+	message := strings.Join([]string{
+		"To: " + email,
+		"From: " + c.From,
+		"Subject: Verify your DaysUntil account",
+		"MIME-Version: 1.0",
+		"Content-Type: text/plain; charset=UTF-8",
+		"",
+		"Verify your DaysUntil account by clicking this link:",
+		verifyURL,
+		"",
+		"This link expires in 24 hours and can only be used once.",
+		"If you did not create a DaysUntil account, you can safely ignore this email.",
 		"",
 	}, "\r\n")
 

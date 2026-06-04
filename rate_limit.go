@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"net"
 	"net/http"
@@ -11,13 +12,15 @@ import (
 )
 
 const (
-	authRateLimitWindow        = time.Minute
-	loginRateLimitRequests     = 10
-	registerRateLimitRequests  = 5
-	magicLinkRateLimitRequests = 5
-	authActionLogin            = "login"
-	authActionRegister         = "register"
-	authActionMagicLink        = "magic_link"
+	authRateLimitWindow           = time.Minute
+	loginRateLimitRequests        = 10
+	registerRateLimitRequests     = 5
+	magicLinkRateLimitRequests    = 5
+	publicLookupRateLimitRequests = 60
+	authActionLogin               = "login"
+	authActionRegister            = "register"
+	authActionMagicLink           = "magic_link"
+	authActionPublicLookup        = "public_lookup"
 )
 
 type authRatePolicy struct {
@@ -32,13 +35,15 @@ type authRateBucket struct {
 
 type authRateLimiter struct {
 	mu       sync.Mutex
+	db       *sql.DB
 	now      func() time.Time
 	policies map[string]authRatePolicy
 	buckets  map[string]authRateBucket
 }
 
-func newAuthRateLimiter() *authRateLimiter {
-	return &authRateLimiter{
+func newAuthRateLimiter(db *sql.DB) *authRateLimiter {
+	l := &authRateLimiter{
+		db:  db,
 		now: time.Now,
 		policies: map[string]authRatePolicy{
 			authActionLogin: {
@@ -53,9 +58,48 @@ func newAuthRateLimiter() *authRateLimiter {
 				limit:  magicLinkRateLimitRequests,
 				window: authRateLimitWindow,
 			},
+			authActionPublicLookup: {
+				limit:  publicLookupRateLimitRequests,
+				window: authRateLimitWindow,
+			},
 		},
 		buckets: make(map[string]authRateBucket),
 	}
+	if db != nil {
+		l.loadFromDB()
+	}
+	return l
+}
+
+func (l *authRateLimiter) loadFromDB() {
+	now := l.now().UTC().Format(time.RFC3339)
+	rows, err := l.db.Query(`SELECT key, count, reset_at FROM rate_limit_buckets WHERE reset_at > ?`, now)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key, resetAtStr string
+		var count int
+		if err := rows.Scan(&key, &count, &resetAtStr); err != nil {
+			continue
+		}
+		resetAt, err := time.Parse(time.RFC3339, resetAtStr)
+		if err != nil {
+			continue
+		}
+		l.buckets[key] = authRateBucket{count: count, resetAt: resetAt}
+	}
+}
+
+func (l *authRateLimiter) persistBucket(key string, bucket authRateBucket) {
+	if l.db == nil {
+		return
+	}
+	_, _ = l.db.Exec(
+		`INSERT OR REPLACE INTO rate_limit_buckets (key, count, reset_at) VALUES (?, ?, ?)`,
+		key, bucket.count, bucket.resetAt.UTC().Format(time.RFC3339),
+	)
 }
 
 func (l *authRateLimiter) allow(action, clientIP string) (bool, time.Duration) {
@@ -74,10 +118,9 @@ func (l *authRateLimiter) allow(action, clientIP string) (bool, time.Duration) {
 
 	bucket, ok := l.buckets[key]
 	if !ok || !bucket.resetAt.After(now) {
-		l.buckets[key] = authRateBucket{
-			count:   1,
-			resetAt: now.Add(policy.window),
-		}
+		b := authRateBucket{count: 1, resetAt: now.Add(policy.window)}
+		l.buckets[key] = b
+		l.persistBucket(key, b)
 		return true, 0
 	}
 
@@ -87,6 +130,7 @@ func (l *authRateLimiter) allow(action, clientIP string) (bool, time.Duration) {
 
 	bucket.count++
 	l.buckets[key] = bucket
+	l.persistBucket(key, bucket)
 	return true, 0
 }
 
@@ -95,6 +139,9 @@ func (l *authRateLimiter) cleanupExpired(now time.Time) {
 		if !bucket.resetAt.After(now) {
 			delete(l.buckets, key)
 		}
+	}
+	if l.db != nil {
+		_, _ = l.db.Exec(`DELETE FROM rate_limit_buckets WHERE reset_at <= ?`, now.UTC().Format(time.RFC3339))
 	}
 }
 

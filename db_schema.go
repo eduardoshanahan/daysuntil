@@ -71,6 +71,15 @@ func initDB(db *sql.DB) error {
 		return err
 	}
 
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS rate_limit_buckets (
+		key      TEXT PRIMARY KEY,
+		count    INTEGER NOT NULL,
+		reset_at TEXT NOT NULL
+	)`)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
