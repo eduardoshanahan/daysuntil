@@ -37,7 +37,9 @@ const {
   btnMenu,
   mobileMenu,
   menuGroupsBadge,
+  menuAuthDivider1,
   menuLogout,
+  menuAuthDivider2,
   menuUserBadge,
   menuVersion,
   btnPickEnd,
@@ -319,7 +321,12 @@ function setCurrentUser(user) {
   btnLogout.classList.toggle('hidden', !isAuthenticated || isPublicView);
   userBadge.classList.toggle('hidden', !isAuthenticated || isPublicView);
   groupsBadge.classList.toggle('hidden', !isAuthenticated || isPublicView);
-  btnMenu.classList.toggle('hidden', !isAuthenticated || isPublicView);
+  btnMenu.classList.remove('hidden');
+  menuUserBadge.classList.toggle('hidden', !isAuthenticated);
+  menuGroupsBadge.classList.toggle('hidden', !isAuthenticated);
+  menuAuthDivider1.classList.toggle('hidden', !isAuthenticated);
+  menuLogout.classList.toggle('hidden', !isAuthenticated);
+  menuAuthDivider2.classList.toggle('hidden', !isAuthenticated);
   publicGroupHeader.classList.toggle('hidden', !isPublicView);
 
   if (isAuthenticated) {
@@ -1284,7 +1291,6 @@ function initPublicView() {
   authView.classList.add('hidden');
   btnAdd.classList.add('hidden');
   btnLogout.classList.add('hidden');
-  btnMenu.classList.add('hidden');
   userBadge.classList.add('hidden');
   profilePanel.classList.add('hidden');
   shareGroupsPanel.classList.add('hidden');
