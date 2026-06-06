@@ -2,7 +2,7 @@ name: Build and Push
 
 on:
   push:
-    branches: [main]
+    branches: [main, vps]
     tags: ['*']
 
 jobs:
@@ -84,4 +84,16 @@ jobs:
             -o UserKnownHostsFile=/dev/null \
             eduardo@rpi-box-01.hhlab.home.arpa \
             "docker pull gitea.hhlab.home.arpa/eduardo/daysuntil:latest && sudo systemctl restart daysuntil"
+          rm -f /tmp/deploy_key
+
+      - name: Deploy to vps-01
+        if: github.ref == 'refs/heads/vps'
+        run: |
+          echo "${{ secrets.DAYSUNTIL_DEPLOY_KEY }}" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+          ssh -i /tmp/deploy_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            eduardo@127.0.0.1 \
+            "${{ github.sha }}"
           rm -f /tmp/deploy_key
