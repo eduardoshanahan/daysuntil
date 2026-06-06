@@ -27,6 +27,7 @@ func newRouter(h *handler) http.Handler {
 		r.Get("/me", h.currentUser)
 		r.Delete("/me", h.deleteAccount)
 		r.Put("/me/profile", h.updateProfile)
+		r.Put("/me/username", h.setUsername)
 		r.Get("/auth/providers", h.authProviders)
 		r.With(authRateLimitMiddleware(h.authLimiter, authActionPublicLookup)).Get("/public/groups/{groupSlug}", h.publicShareGroup)
 	})

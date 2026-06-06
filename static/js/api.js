@@ -32,6 +32,7 @@
     me: () => apiFetch('/api/me'),
     deleteAccount: () => apiFetch('/api/me', { method: 'DELETE' }),
     updateProfile: data => apiFetch('/api/me/profile', { method: 'PUT', body: JSON.stringify(data) }),
+    setUsername: data => apiFetch('/api/me/username', { method: 'PUT', body: JSON.stringify(data) }),
     register: data => apiFetch('/api/register', { method: 'POST', body: JSON.stringify(data) }),
     login: data => apiFetch('/api/login', { method: 'POST', body: JSON.stringify(data) }),
     requestLoginLink: data => apiFetch('/api/login/link', { method: 'POST', body: JSON.stringify(data) }),

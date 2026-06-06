@@ -19,6 +19,7 @@ const {
   authForm,
   authGithub,
   authKicker,
+  authMagicLink,
   authOAuth,
   authPassword,
   authPasswordRow,
@@ -28,9 +29,14 @@ const {
   authSwitch,
   authSwitchLabel,
   authTitle,
-  authUsername,
-  authUsernameRow,
   authView,
+  usernameForm,
+  usernameInput,
+  usernameSave,
+  usernameError,
+  usernameFormSection,
+  usernameDisplaySection,
+  usernameDisplayValue,
   btnAdd,
   btnCancel,
   btnLogout,
@@ -94,6 +100,7 @@ let isSubmitting = false;
 let isAuthSubmitting = false;
 let isProfileSubmitting = false;
 let isShareGroupSubmitting = false;
+let isUsernameSubmitting = false;
 let isRegisterMode = false;
 let isMagicLinkEnabled = false;
 let activeLoadToken = 0;
@@ -337,9 +344,13 @@ function setCurrentUser(user) {
     userBadge.textContent = user.display_name || user.username;
     menuUserBadge.textContent = user.display_name || user.username;
     profileDisplayName.value = user.display_name || user.username;
+    usernameFormSection.classList.toggle('hidden', user.username_set);
+    usernameDisplaySection.classList.toggle('hidden', !user.username_set);
+    if (user.username_set) {
+      usernameDisplayValue.textContent = user.username;
+    }
     updateManagementSummaries();
     authEmail.value = '';
-    authUsername.value = '';
     authPassword.value = '';
     clearAuthError();
   } else {
@@ -638,19 +649,15 @@ function setAuthMode(registerMode) {
   authKicker.textContent = registerMode ? 'Create account' : 'Login';
   authTitle.textContent = registerMode ? 'Create your account' : 'Sign in to your account';
   authSubtitle.textContent = registerMode
-    ? 'Use your email to sign in, and choose a separate public username.'
-    : isMagicLinkEnabled
-      ? 'Enter your email and we will send you a one-time sign-in link.'
-      : 'Sign in with your email. Share groups stay separate from your account identity.';
-  authSubmit.textContent = registerMode ? 'Create account' : (isMagicLinkEnabled ? 'Email me a link' : 'Log in');
+    ? 'Create an account with your email and password.'
+    : 'Sign in with your email and password.';
+  authSubmit.textContent = registerMode ? 'Create account' : 'Log in';
   authSwitchLabel.textContent = registerMode ? 'Already have an account?' : 'Need an account?';
   authSwitch.textContent = registerMode ? 'Log in instead' : 'Create one';
-  authUsernameRow.classList.toggle('hidden', !registerMode);
-  authPasswordRow.classList.toggle('hidden', !registerMode && isMagicLinkEnabled);
-  authUsername.required = registerMode;
-  authPassword.required = registerMode || !isMagicLinkEnabled;
+  authPassword.required = true;
   authEmail.autocomplete = 'email';
   authPassword.autocomplete = registerMode ? 'new-password' : 'current-password';
+  authMagicLink.classList.toggle('hidden', registerMode || !isMagicLinkEnabled);
   clearAuthError();
 }
 
@@ -659,10 +666,26 @@ function setAuthSubmitting(nextValue) {
   authSubmit.disabled = nextValue;
   authSwitch.disabled = nextValue;
   authEmail.disabled = nextValue;
-  authUsername.disabled = nextValue;
   authPassword.disabled = nextValue;
+  authMagicLink.disabled = nextValue;
   authGithub.classList.toggle('disabled', nextValue);
   authGithub.setAttribute('aria-disabled', nextValue ? 'true' : 'false');
+}
+
+function setUsernameSubmitting(nextValue) {
+  isUsernameSubmitting = nextValue;
+  usernameSave.disabled = nextValue;
+  usernameInput.disabled = nextValue;
+}
+
+function showUsernameError(message) {
+  usernameError.textContent = message;
+  usernameError.classList.remove('hidden');
+}
+
+function clearUsernameError() {
+  usernameError.textContent = '';
+  usernameError.classList.add('hidden');
 }
 
 function setProfileSubmitting(nextValue) {
@@ -975,11 +998,7 @@ btnRetry.addEventListener('click', () => {
 });
 authSwitch.addEventListener('click', () => {
   setAuthMode(!isRegisterMode);
-  if (isRegisterMode) {
-    authUsername.focus();
-  } else {
-    authEmail.focus();
-  }
+  authEmail.focus();
 });
 authResendVerification.addEventListener('click', async () => {
   const email = authResendVerification.dataset.email || authEmail.value.trim();
@@ -1069,16 +1088,14 @@ authForm.addEventListener('submit', async event => {
 
   clearAuthError();
   const email = authEmail.value.trim();
-  const username = authUsername.value.trim();
   const password = authPassword.value;
   if (!email) return showAuthError('Email is required.');
-  if (isRegisterMode && !username) return showAuthError('Username is required.');
-  if ((isRegisterMode || !isMagicLinkEnabled) && !password) return showAuthError('Password is required.');
+  if (!password) return showAuthError('Password is required.');
 
   try {
     setAuthSubmitting(true);
     if (isRegisterMode) {
-      const result = await api.register({ email, username, password });
+      const result = await api.register({ email, password });
       if (!result || !result.id) {
         showAuthError(result?.message || 'Check your email to verify your account before signing in.');
         return;
@@ -1088,9 +1105,6 @@ authForm.addEventListener('submit', async event => {
       list.innerHTML = '<p id="loading-msg" class="empty-msg">Loading intervals...</p>';
       await loadShareGroups();
       await loadIntervals();
-    } else if (isMagicLinkEnabled) {
-      await api.requestLoginLink({ email });
-      showAuthError('If that email has an account, a sign-in link is on its way.');
     } else {
       const user = await api.login({ email, password });
       setCurrentUser(user);
@@ -1107,6 +1121,23 @@ authForm.addEventListener('submit', async event => {
     } else {
       showAuthError(err.message);
     }
+  } finally {
+    setAuthSubmitting(false);
+  }
+});
+
+authMagicLink.addEventListener('click', async () => {
+  if (isAuthSubmitting) return;
+  const email = authEmail.value.trim();
+  if (!email) return showAuthError('Enter your email first.');
+
+  clearAuthError();
+  try {
+    setAuthSubmitting(true);
+    await api.requestLoginLink({ email });
+    showAuthError('If that email has an account, a sign-in link is on its way.');
+  } catch (err) {
+    showAuthError(err.message);
   } finally {
     setAuthSubmitting(false);
   }
@@ -1136,11 +1167,45 @@ profileForm.addEventListener('submit', async event => {
   }
 });
 
+usernameForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (isUsernameSubmitting || !currentUser) return;
+
+  clearUsernameError();
+  const username = usernameInput.value.trim();
+  if (!username) return showUsernameError('Username is required.');
+
+  try {
+    setUsernameSubmitting(true);
+    const updatedUser = await api.setUsername({ username });
+    setCurrentUser(updatedUser);
+    showStatus('Username set.', { tone: 'status' });
+  } catch (err) {
+    if (err.status === 401) {
+      handleUnauthorized('Your session has ended. Log in again.');
+      return;
+    }
+    showUsernameError(err.message);
+  } finally {
+    setUsernameSubmitting(false);
+  }
+});
+
 shareGroupForm.addEventListener('submit', async event => {
   event.preventDefault();
   if (isShareGroupSubmitting || !currentUser) return;
 
   clearShareGroupError();
+
+  if (!currentUser.username_set) {
+    showShareGroupError('Set a username in your Account settings before creating share groups.');
+    profilePanel.removeAttribute('open');
+    profilePanel.classList.remove('hidden');
+    profilePanel.open = true;
+    profilePanel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    return;
+  }
+
   const name = shareGroupName.value.trim();
   if (!name) return showShareGroupError('Group name is required.');
 
@@ -1163,7 +1228,7 @@ shareGroupForm.addEventListener('submit', async event => {
 
 profileDeleteAccount.addEventListener('click', async () => {
   if (isProfileSubmitting || !currentUser) return;
-  if (!confirm(`Delete account "${currentUser.username}"? This will permanently remove your intervals, groups, and session.`)) return;
+  if (!confirm(`Delete your account? This will permanently remove your intervals, groups, and session.`)) return;
 
   clearProfileError();
   try {

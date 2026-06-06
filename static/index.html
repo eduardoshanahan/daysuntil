@@ -48,11 +48,6 @@
           <input type="email" id="auth-email" autocomplete="email" required />
         </div>
 
-        <div id="auth-username-row" class="hidden">
-          <label for="auth-username">Username</label>
-          <input type="text" id="auth-username" autocomplete="username" />
-        </div>
-
         <div id="auth-password-row">
           <label for="auth-password">Password</label>
           <input type="password" id="auth-password" autocomplete="current-password" required />
@@ -64,6 +59,7 @@
         <div class="auth-actions">
           <button id="auth-submit" type="submit" class="btn-primary">Log in</button>
         </div>
+        <button id="auth-magic-link" type="button" class="btn-link hidden">Email me a sign-in link instead</button>
       </form>
 
       <div id="auth-oauth" class="auth-oauth hidden">
@@ -111,6 +107,20 @@
       </summary>
       <div class="panel-body">
         <p class="profile-help">Update your display name for public share-group pages.</p>
+        <div id="username-form-section" class="hidden">
+          <form id="username-form" class="profile-form" novalidate>
+            <label for="username-input">Username</label>
+            <p class="profile-help">Required for public share groups. Cannot be changed once set.</p>
+            <div class="profile-form-row">
+              <input type="text" id="username-input" maxlength="64" autocomplete="username" />
+              <button id="username-save" type="submit" class="btn-secondary">Set</button>
+            </div>
+            <p id="username-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
+          </form>
+        </div>
+        <div id="username-display-section" class="hidden">
+          <p class="profile-help">Username: <strong id="username-display-value"></strong></p>
+        </div>
         <form id="profile-form" class="profile-form" novalidate>
           <label for="profile-display-name">Display name</label>
           <div class="profile-form-row">

@@ -33,6 +33,11 @@ func (h *handler) createShareGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !user.UsernameSet {
+		http.Error(w, "set a username before creating a share group", http.StatusUnprocessableEntity)
+		return
+	}
+
 	var payload shareGroupPayload
 	if err := decodeJSONBody(w, r, &payload); err != nil {
 		return

@@ -41,11 +41,11 @@ type User struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
 	PublicSlug  string `json:"public_slug"`
+	UsernameSet bool   `json:"username_set"`
 }
 
 type registerCredentials struct {
 	Email    string `json:"email"`
-	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
@@ -98,7 +98,8 @@ func initAuthDB(db *sql.DB) error {
 		password_hash         TEXT NOT NULL,
 		auth_provider         TEXT NOT NULL DEFAULT '',
 		auth_provider_user_id TEXT NOT NULL DEFAULT '',
-		created_at            TEXT NOT NULL
+		created_at            TEXT NOT NULL,
+		username_set          INTEGER NOT NULL DEFAULT 0
 	)`)
 	if err != nil {
 		return err
@@ -130,6 +131,20 @@ func initAuthDB(db *sql.DB) error {
 		}
 		// Mark all pre-existing users as verified — they existed before email verification was added
 		if _, err := db.Exec(`UPDATE users SET email_verified=1`); err != nil {
+			return err
+		}
+	}
+
+	usernameSetExists, err := tableColumnExists(db, "users", "username_set")
+	if err != nil {
+		return err
+	}
+	if !usernameSetExists {
+		if _, err := db.Exec("ALTER TABLE users ADD COLUMN username_set INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+		// All pre-existing users already chose a username at registration
+		if _, err := db.Exec(`UPDATE users SET username_set=1`); err != nil {
 			return err
 		}
 	}
@@ -256,6 +271,9 @@ func validateUsername(username string) (string, error) {
 	if username == "" {
 		return "", fmt.Errorf("username is required")
 	}
+	if strings.HasPrefix(username, "pending-") {
+		return "", fmt.Errorf("username is not available")
+	}
 	if len(username) < 3 {
 		return "", fmt.Errorf("username must be at least 3 characters")
 	}
@@ -278,23 +296,32 @@ func validatePassword(password string) error {
 	return nil
 }
 
-func validateRegistration(creds registerCredentials) (string, string, error) {
+func validateRegistration(creds registerCredentials) (string, error) {
 	email, err := validateEmail(creds.Email)
 	if err != nil {
-		return "", "", err
-	}
-	username, err := validateUsername(creds.Username)
-	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	if err := validatePassword(creds.Password); err != nil {
-		return "", "", err
+		return "", err
 	}
-	return email, username, nil
+	return email, nil
+}
+
+func randomPlaceholderUsername() (string, error) {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("pending-%x", buf), nil
+}
+
+func emailLocalPart(email string) string {
+	parts := strings.SplitN(email, "@", 2)
+	return parts[0]
 }
 
 func createUser(db *sql.DB, creds registerCredentials) (User, error) {
-	email, username, err := validateRegistration(creds)
+	email, err := validateRegistration(creds)
 	if err != nil {
 		return User{}, err
 	}
@@ -303,6 +330,13 @@ func createUser(db *sql.DB, creds registerCredentials) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
+
+	placeholderUsername, err := randomPlaceholderUsername()
+	if err != nil {
+		return User{}, err
+	}
+
+	displayName := emailLocalPart(email)
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -316,8 +350,8 @@ func createUser(db *sql.DB, creds registerCredentials) (User, error) {
 	}
 
 	res, err := tx.Exec(
-		`INSERT INTO users (email, username, public_slug, display_name, password_hash, auth_provider, auth_provider_user_id, created_at) VALUES (?, ?, '', ?, ?, '', '', ?)`,
-		email, username, username, string(passwordHash), time.Now().UTC().Format(time.RFC3339),
+		`INSERT INTO users (email, username, public_slug, display_name, password_hash, auth_provider, auth_provider_user_id, created_at, username_set) VALUES (?, ?, '', ?, ?, '', '', ?, 0)`,
+		email, placeholderUsername, displayName, string(passwordHash), time.Now().UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
@@ -347,7 +381,7 @@ func createUser(db *sql.DB, creds registerCredentials) (User, error) {
 		return User{}, err
 	}
 
-	return User{ID: userID, Username: username, DisplayName: username, PublicSlug: publicSlug}, nil
+	return User{ID: userID, Username: placeholderUsername, DisplayName: displayName, PublicSlug: publicSlug, UsernameSet: false}, nil
 }
 
 func authenticateUser(db *sql.DB, creds loginCredentials) (User, error) {
@@ -359,16 +393,18 @@ func authenticateUser(db *sql.DB, creds loginCredentials) (User, error) {
 	var user User
 	var passwordHash string
 	var emailVerified int
+	var usernameSet int
 	err := db.QueryRow(
-		`SELECT id, username, public_slug, display_name, password_hash, email_verified FROM users WHERE email=?`,
+		`SELECT id, username, public_slug, display_name, password_hash, email_verified, username_set FROM users WHERE email=?`,
 		email,
-	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &passwordHash, &emailVerified)
+	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &passwordHash, &emailVerified, &usernameSet)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, errUserNotFound
 		}
 		return User{}, err
 	}
+	user.UsernameSet = usernameSet == 1
 
 	if passwordHash == "" {
 		return user, errUserNotFound
@@ -453,16 +489,18 @@ func urlUsesHTTPS(rawURL string) bool {
 
 func findUserByProvider(db *sql.DB, provider, providerUserID string) (User, error) {
 	var user User
+	var usernameSet int
 	err := db.QueryRow(
-		`SELECT id, username, public_slug, display_name FROM users WHERE auth_provider=? AND auth_provider_user_id=?`,
+		`SELECT id, username, public_slug, display_name, username_set FROM users WHERE auth_provider=? AND auth_provider_user_id=?`,
 		provider, providerUserID,
-	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName)
+	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &usernameSet)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
 		}
 		return User{}, err
 	}
+	user.UsernameSet = usernameSet == 1
 	return user, nil
 }
 
@@ -473,16 +511,18 @@ func findUserByEmail(db *sql.DB, email string) (User, error) {
 	}
 
 	var user User
+	var usernameSet int
 	err := db.QueryRow(
-		`SELECT id, username, public_slug, display_name FROM users WHERE email=?`,
+		`SELECT id, username, public_slug, display_name, username_set FROM users WHERE email=?`,
 		email,
-	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName)
+	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &usernameSet)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, errUserNotFound
 		}
 		return User{}, err
 	}
+	user.UsernameSet = usernameSet == 1
 
 	user.PublicSlug, err = ensurePublicSlug(db, user.ID, user.PublicSlug)
 	if err != nil {
@@ -518,7 +558,7 @@ func findOrCreateOAuthUser(db *sql.DB, provider, providerUserID, providerLogin s
 	username := baseUsername
 	for attempt := 2; ; attempt += 1 {
 		res, err := tx.Exec(
-			`INSERT INTO users (email, username, public_slug, display_name, password_hash, auth_provider, auth_provider_user_id, created_at) VALUES ('', ?, '', ?, '', ?, ?, ?)`,
+			`INSERT INTO users (email, username, public_slug, display_name, password_hash, auth_provider, auth_provider_user_id, created_at, username_set) VALUES ('', ?, '', ?, '', ?, ?, ?, 1)`,
 			username, providerLogin, provider, providerUserID, now,
 		)
 		if err == nil {
@@ -546,7 +586,7 @@ func findOrCreateOAuthUser(db *sql.DB, provider, providerUserID, providerLogin s
 			if slugErr != nil {
 				return User{}, slugErr
 			}
-			return User{ID: userID, Username: username, DisplayName: displayName, PublicSlug: publicSlug}, nil
+			return User{ID: userID, Username: username, DisplayName: displayName, PublicSlug: publicSlug, UsernameSet: true}, nil
 		}
 
 		errText := strings.ToLower(err.Error())
@@ -663,19 +703,21 @@ func findUserBySession(db *sql.DB, rawToken string) (User, error) {
 	var user User
 	var expiresAt string
 
+	var usernameSet int
 	err := db.QueryRow(
-		`SELECT u.id, u.username, u.public_slug, u.display_name, s.expires_at
+		`SELECT u.id, u.username, u.public_slug, u.display_name, u.username_set, s.expires_at
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.id=?`,
 		hashToken(rawToken),
-	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &expiresAt)
+	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &usernameSet, &expiresAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
 		}
 		return User{}, err
 	}
+	user.UsernameSet = usernameSet == 1
 
 	expiresTime, err := time.Parse(time.RFC3339, expiresAt)
 	if err != nil {
@@ -729,23 +771,25 @@ func consumeMagicLinkToken(db *sql.DB, rawToken string) (User, error) {
 	defer tx.Rollback()
 
 	var (
-		user      User
-		expiresAt string
-		usedAt    string
+		user            User
+		expiresAt       string
+		usedAt          string
+		magicUsernameSet int
 	)
 	err = tx.QueryRow(
-		`SELECT u.id, u.username, u.public_slug, u.display_name, lt.expires_at, lt.used_at
+		`SELECT u.id, u.username, u.public_slug, u.display_name, u.username_set, lt.expires_at, lt.used_at
 		FROM login_tokens lt
 		JOIN users u ON u.id = lt.user_id
 		WHERE lt.id=?`,
 		hashToken(rawToken),
-	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &expiresAt, &usedAt)
+	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &magicUsernameSet, &expiresAt, &usedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
 		}
 		return User{}, err
 	}
+	user.UsernameSet = magicUsernameSet == 1
 
 	if strings.TrimSpace(usedAt) != "" {
 		return User{}, ErrNotFound
@@ -986,23 +1030,25 @@ func consumeEmailVerificationToken(db *sql.DB, rawToken string) (User, error) {
 	defer tx.Rollback()
 
 	var (
-		user      User
-		expiresAt string
-		usedAt    string
+		user               User
+		expiresAt          string
+		usedAt             string
+		verifyUsernameSet  int
 	)
 	err = tx.QueryRow(
-		`SELECT u.id, u.username, u.public_slug, u.display_name, et.expires_at, et.used_at
+		`SELECT u.id, u.username, u.public_slug, u.display_name, u.username_set, et.expires_at, et.used_at
 		FROM email_verification_tokens et
 		JOIN users u ON u.id = et.user_id
 		WHERE et.id=?`,
 		hashToken(rawToken),
-	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &expiresAt, &usedAt)
+	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &verifyUsernameSet, &expiresAt, &usedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
 		}
 		return User{}, err
 	}
+	user.UsernameSet = verifyUsernameSet == 1
 
 	if strings.TrimSpace(usedAt) != "" {
 		return User{}, ErrNotFound

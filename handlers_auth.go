@@ -332,6 +332,32 @@ func (h *handler) verifyEmail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, user)
 }
 
+func (h *handler) setUsername(w http.ResponseWriter, r *http.Request) {
+	user, err := authenticatedUser(h.db, r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+	}
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		return
+	}
+
+	updatedUser, err := setUserUsername(h.db, user.ID, req.Username)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, updatedUser)
+}
+
 func (h *handler) resendVerification(w http.ResponseWriter, r *http.Request) {
 	if !h.magicLinks.Enabled() {
 		http.Error(w, "email is not configured", http.StatusServiceUnavailable)

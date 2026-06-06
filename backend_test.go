@@ -90,7 +90,7 @@ func decodeShareGroup(t *testing.T, rec *httptest.ResponseRecorder) ShareGroup {
 func registerUser(t *testing.T, h http.Handler, email, username, password string) (*http.Cookie, User) {
 	t.Helper()
 
-	rec := performRequest(t, h, http.MethodPost, "/api/register", `{"email":"`+email+`","username":"`+username+`","password":"`+password+`"}`)
+	rec := performRequest(t, h, http.MethodPost, "/api/register", `{"email":"`+email+`","password":"`+password+`"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("register user: expected 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
@@ -100,7 +100,12 @@ func registerUser(t *testing.T, h http.Handler, email, username, password string
 		t.Fatal("expected session cookie after registration")
 	}
 
-	return cookies[0], decodeUser(t, rec)
+	setRec := performRequest(t, h, http.MethodPut, "/api/me/username", `{"username":"`+username+`"}`, cookies[0])
+	if setRec.Code != http.StatusOK {
+		t.Fatalf("set username: expected 200, got %d (%s)", setRec.Code, setRec.Body.String())
+	}
+
+	return cookies[0], decodeUser(t, setRec)
 }
 
 func createShareGroupForTest(t *testing.T, router http.Handler, cookie *http.Cookie, name string) ShareGroup {
@@ -749,13 +754,13 @@ func TestRegisterRateLimitReturnsTooManyRequests(t *testing.T) {
 	_, router := newTestServerWithHandler(t, &handler{authLimiter: limiter})
 
 	for attempt := 1; attempt <= 2; attempt++ {
-		rec := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/register", `{"email":"user`+string(rune('0'+attempt))+`@example.com","username":"user`+string(rune('0'+attempt))+`","password":"password123"}`, "203.0.113.22:8080")
+		rec := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/register", `{"email":"user`+string(rune('0'+attempt))+`@example.com","password":"password123"}`, "203.0.113.22:8080")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("attempt %d: expected 200, got %d (%s)", attempt, rec.Code, rec.Body.String())
 		}
 	}
 
-	blocked := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/register", `{"email":"user3@example.com","username":"user3","password":"password123"}`, "203.0.113.22:8080")
+	blocked := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/register", `{"email":"user3@example.com","password":"password123"}`, "203.0.113.22:8080")
 	if blocked.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429 after limit, got %d (%s)", blocked.Code, blocked.Body.String())
 	}
@@ -785,7 +790,7 @@ func TestLoginAndRegisterRateLimitsAreIndependent(t *testing.T) {
 		t.Fatalf("expected second login attempt to be rate-limited, got %d", secondLogin.Code)
 	}
 
-	registerAttempt := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/register", `{"email":"bob@example.com","username":"bob","password":"password123"}`, "198.51.100.30:9999")
+	registerAttempt := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/register", `{"email":"bob@example.com","password":"password123"}`, "198.51.100.30:9999")
 	if registerAttempt.Code != http.StatusOK {
 		t.Fatalf("expected register limit to remain independent, got %d (%s)", registerAttempt.Code, registerAttempt.Body.String())
 	}
@@ -808,7 +813,7 @@ func TestLoginRejectsUsernameAsIdentifier(t *testing.T) {
 func TestRegisterRejectsEmailWithoutDotInDomain(t *testing.T) {
 	_, router := newTestServer(t)
 
-	rec := performRequest(t, router, http.MethodPost, "/api/register", `{"email":"contact@nodomain","username":"alice","password":"password123"}`)
+	rec := performRequest(t, router, http.MethodPost, "/api/register", `{"email":"contact@nodomain","password":"password123"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for email without dot in domain, got %d (%s)", rec.Code, rec.Body.String())
 	}
@@ -881,7 +886,7 @@ func TestMagicLinkRequestStoresHashedTokenAndConsumeCreatesSession(t *testing.T)
 
 	// Register with SMTP configured — returns 202 (verification email sent via stub).
 	// Directly mark the user verified to avoid coupling this test to the email verification flow.
-	regRec := performRequest(t, router, http.MethodPost, "/api/register", `{"email":"alice@example.com","username":"alice","password":"password123"}`)
+	regRec := performRequest(t, router, http.MethodPost, "/api/register", `{"email":"alice@example.com","password":"password123"}`)
 	if regRec.Code != http.StatusAccepted {
 		t.Fatalf("register: expected 202, got %d (%s)", regRec.Code, regRec.Body.String())
 	}
