@@ -154,15 +154,27 @@ function refreshForDateChange() {
   scheduleMidnightRefresh();
 }
 
-function renderShareGroupOptions(selectedID = null) {
-  fieldShareGroup.innerHTML = '<option value="">Private</option>';
+function renderShareGroupOptions(selectedIDs = []) {
+  const selectedSet = new Set(selectedIDs.map(Number));
+  fieldShareGroup.innerHTML = '';
+  if (currentShareGroups.length === 0) {
+    const empty = document.createElement('span');
+    empty.className = 'group-checkboxes-empty';
+    empty.textContent = 'No groups yet.';
+    fieldShareGroup.appendChild(empty);
+    return;
+  }
   currentShareGroups.forEach(group => {
-    const option = document.createElement('option');
-    option.value = String(group.id);
-    option.textContent = group.name;
-    fieldShareGroup.appendChild(option);
+    const label = document.createElement('label');
+    label.className = 'group-checkbox-label';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = String(group.id);
+    cb.checked = selectedSet.has(group.id);
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(' ' + group.name));
+    fieldShareGroup.appendChild(label);
   });
-  fieldShareGroup.value = selectedID == null ? '' : String(selectedID);
 }
 
 function intervalCountsByGroup() {
@@ -539,7 +551,7 @@ function openEdit(iv) {
   fieldStart.value = iv.start_date;
   fieldEnd.value = iv.end_date;
   fieldColor.value = iv.color || '#4f8ef7';
-  renderShareGroupOptions(iv.share_groups[0]?.id ?? null);
+  renderShareGroupOptions(iv.share_groups.map(g => g.id));
   hideError();
   document.body.classList.add('modal-open');
   overlay.classList.remove('hidden');
@@ -1255,7 +1267,7 @@ form.addEventListener('submit', async event => {
   const name = fieldName.value.trim();
   const start = fieldStart.value;
   const end = fieldEnd.value;
-  const shareGroupID = fieldShareGroup.value ? Number(fieldShareGroup.value) : null;
+  const shareGroupIDs = Array.from(fieldShareGroup.querySelectorAll('input[type=checkbox]:checked')).map(cb => Number(cb.value));
 
   if (!name) return showError('Name is required.');
   if (!start) return showError('Start date is required.');
@@ -1264,7 +1276,7 @@ form.addEventListener('submit', async event => {
   if (!isValidISODate(end)) return showError('End date must be in YYYY-MM-DD format.');
   if (start > end) return showError('End date must be on or after start date.');
 
-  const data = { name, start_date: start, end_date: end, color: fieldColor.value, share_group_ids: shareGroupID !== null ? [shareGroupID] : [] };
+  const data = { name, start_date: start, end_date: end, color: fieldColor.value, share_group_ids: shareGroupIDs };
 
   try {
     setSubmitting(true);
