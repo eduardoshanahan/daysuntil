@@ -1361,6 +1361,12 @@ function initPublicView() {
   shareGroupsPanel.classList.add('hidden');
   publicGroupHeader.classList.remove('hidden');
   appView.classList.remove('hidden');
+  btnMenu.classList.remove('hidden');
+  menuUserBadge.classList.add('hidden');
+  menuGroupsBadge.classList.add('hidden');
+  menuAuthDivider1.classList.add('hidden');
+  menuLogout.classList.add('hidden');
+  menuAuthDivider2.classList.add('hidden');
   api.version()
     .then(build => setVersionLabel(build.version))
     .catch(() => setVersionLabel('dev'));
