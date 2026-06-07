@@ -169,11 +169,13 @@ function intervalCountsByGroup() {
   const counts = new Map();
   let privateCount = 0;
   for (const interval of currentIntervals) {
-    if (interval.share_group_id == null) {
+    if (interval.share_groups.length === 0) {
       privateCount += 1;
       continue;
     }
-    counts.set(interval.share_group_id, (counts.get(interval.share_group_id) || 0) + 1);
+    for (const group of interval.share_groups) {
+      counts.set(group.id, (counts.get(group.id) || 0) + 1);
+    }
   }
   return { counts, privateCount, total: currentIntervals.length };
 }
@@ -181,10 +183,10 @@ function intervalCountsByGroup() {
 function filteredIntervals() {
   if (activeIntervalFilter === 'all') return currentIntervals;
   if (activeIntervalFilter === 'private') {
-    return currentIntervals.filter(interval => interval.share_group_id == null);
+    return currentIntervals.filter(interval => interval.share_groups.length === 0);
   }
   const groupID = Number(activeIntervalFilter);
-  return currentIntervals.filter(interval => interval.share_group_id === groupID);
+  return currentIntervals.filter(interval => interval.share_groups.some(g => g.id === groupID));
 }
 
 function renderIntervalFilters() {
@@ -242,11 +244,10 @@ function updateManagementSummaries() {
   }
 
   accountSummary.textContent = `Signed in as ${currentUser.display_name || currentUser.username}.`;
-  const { counts, total } = intervalCountsByGroup();
-  let sharedIntervals = 0;
-  for (const count of counts.values()) sharedIntervals += count;
+  const { counts, privateCount, total } = intervalCountsByGroup();
+  const sharedIntervals = total - privateCount;
   const groupCount = currentShareGroups.length;
-  shareGroupsSummary.textContent = `${groupCount} group${groupCount !== 1 ? 's' : ''}, ${sharedIntervals} shared interval${sharedIntervals !== 1 ? 's' : ''}, ${total - sharedIntervals} private.`;
+  shareGroupsSummary.textContent = `${groupCount} group${groupCount !== 1 ? 's' : ''}, ${sharedIntervals} shared interval${sharedIntervals !== 1 ? 's' : ''}, ${privateCount} private.`;
   userBadge.setAttribute('aria-expanded', profilePanel.open ? 'true' : 'false');
   groupsBadge.setAttribute('aria-expanded', shareGroupsPanel.open ? 'true' : 'false');
 }
@@ -275,8 +276,8 @@ function renderCard(iv, options = {}) {
 
   const shareBadge = !showShareBadge
     ? ''
-    : iv.share_group_name
-      ? `<span class="status-badge share-badge">${escHtml(iv.share_group_name)}</span>`
+    : iv.share_groups.length > 0
+      ? iv.share_groups.map(g => `<span class="status-badge share-badge">${escHtml(g.name)}</span>`).join('')
       : `<span class="status-badge private-badge">private</span>`;
 
   const actions = showActions
@@ -538,7 +539,7 @@ function openEdit(iv) {
   fieldStart.value = iv.start_date;
   fieldEnd.value = iv.end_date;
   fieldColor.value = iv.color || '#4f8ef7';
-  renderShareGroupOptions(iv.share_group_id);
+  renderShareGroupOptions(iv.share_groups[0]?.id ?? null);
   hideError();
   document.body.classList.add('modal-open');
   overlay.classList.remove('hidden');
@@ -1263,7 +1264,7 @@ form.addEventListener('submit', async event => {
   if (!isValidISODate(end)) return showError('End date must be in YYYY-MM-DD format.');
   if (start > end) return showError('End date must be on or after start date.');
 
-  const data = { name, start_date: start, end_date: end, color: fieldColor.value, share_group_id: shareGroupID };
+  const data = { name, start_date: start, end_date: end, color: fieldColor.value, share_group_ids: shareGroupID !== null ? [shareGroupID] : [] };
 
   try {
     setSubmitting(true);
