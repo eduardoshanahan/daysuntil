@@ -7,30 +7,30 @@ import (
 	"strings"
 )
 
-func validateInterval(iv Interval, db *sql.DB, userID int64) (*int64, error) {
-	name := strings.TrimSpace(iv.Name)
+func validateInterval(input intervalInput, db *sql.DB, userID int64) ([]int64, error) {
+	name := strings.TrimSpace(input.Name)
 	if name == "" {
 		return nil, fmt.Errorf("name is required")
 	}
-	start, err := parseDate(iv.StartDate)
+	start, err := parseDate(input.StartDate)
 	if err != nil {
 		return nil, fmt.Errorf("invalid start_date: %w", err)
 	}
-	end, err := parseDate(iv.EndDate)
+	end, err := parseDate(input.EndDate)
 	if err != nil {
 		return nil, fmt.Errorf("invalid end_date: %w", err)
 	}
 	if end.Before(start) {
 		return nil, fmt.Errorf("end_date must be on or after start_date")
 	}
-	groupID, err := shareGroupOwnedByUser(db, userID, iv.ShareGroupID)
+	groupIDs, err := shareGroupsOwnedByUser(db, userID, input.ShareGroupIDs)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, fmt.Errorf("share group not found")
 		}
 		return nil, err
 	}
-	return groupID, nil
+	return groupIDs, nil
 }
 
 func validateDisplayName(displayName string) (string, error) {

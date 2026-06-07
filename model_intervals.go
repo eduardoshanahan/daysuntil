@@ -8,11 +8,7 @@ import (
 
 func listIntervals(db *sql.DB, userID int64) ([]Interval, error) {
 	rows, err := db.Query(
-		`SELECT i.id, i.name, i.start_date, i.end_date, i.color, i.position, sg.id, sg.name, sg.public_slug
-		FROM intervals i
-		LEFT JOIN share_groups sg ON sg.id = i.share_group_id
-		WHERE i.user_id=?
-		ORDER BY i.position, i.id`,
+		`SELECT id, name, start_date, end_date, color, position FROM intervals WHERE user_id=? ORDER BY position, id`,
 		userID,
 	)
 	if err != nil {
@@ -22,101 +18,150 @@ func listIntervals(db *sql.DB, userID int64) ([]Interval, error) {
 
 	var intervals []Interval
 	for rows.Next() {
-		iv, err := scanIntervalRow(rows)
+		var iv Interval
+		if err := rows.Scan(&iv.ID, &iv.Name, &iv.StartDate, &iv.EndDate, &iv.Color, &iv.Position); err != nil {
+			return nil, err
+		}
+		iv.ShareGroups = []ShareGroup{}
+		intervals = append(intervals, iv)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for i := range intervals {
+		groups, err := intervalGroupsByID(db, intervals[i].ID)
 		if err != nil {
 			return nil, err
 		}
-		intervals = append(intervals, iv)
+		intervals[i].ShareGroups = groups
 	}
-	return intervals, rows.Err()
+
+	if intervals == nil {
+		return []Interval{}, nil
+	}
+	return intervals, nil
 }
 
-func createInterval(db *sql.DB, userID int64, iv Interval) (Interval, error) {
-	if iv.Color == "" {
-		iv.Color = "#4f8ef7"
+func intervalGroupsByID(db *sql.DB, intervalID int64) ([]ShareGroup, error) {
+	rows, err := db.Query(
+		`SELECT sg.id, sg.name, sg.public_slug
+		FROM interval_share_groups isg
+		JOIN share_groups sg ON sg.id = isg.share_group_id
+		WHERE isg.interval_id = ?`,
+		intervalID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var groups []ShareGroup
+	for rows.Next() {
+		var g ShareGroup
+		if err := rows.Scan(&g.ID, &g.Name, &g.PublicSlug); err != nil {
+			return nil, err
+		}
+		groups = append(groups, g)
+	}
+	if groups == nil {
+		groups = []ShareGroup{}
+	}
+	return groups, rows.Err()
+}
+
+func createInterval(db *sql.DB, userID int64, input intervalInput) (Interval, error) {
+	if input.Color == "" {
+		input.Color = "#4f8ef7"
 	}
 	position, err := nextIntervalPosition(db, userID)
 	if err != nil {
 		return Interval{}, err
 	}
-	res, err := db.Exec(
-		`INSERT INTO intervals (user_id, name, start_date, end_date, color, position, share_group_id, visibility) VALUES (?, ?, ?, ?, ?, ?, ?, 'private')`,
-		userID, iv.Name, iv.StartDate, iv.EndDate, iv.Color, position, iv.ShareGroupID,
+
+	tx, err := db.Begin()
+	if err != nil {
+		return Interval{}, err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(
+		`INSERT INTO intervals (user_id, name, start_date, end_date, color, position) VALUES (?, ?, ?, ?, ?, ?)`,
+		userID, input.Name, input.StartDate, input.EndDate, input.Color, position,
 	)
 	if err != nil {
 		return Interval{}, err
 	}
-	iv.ID, _ = res.LastInsertId()
-	return intervalByID(db, userID, iv.ID)
+	id, _ := res.LastInsertId()
+
+	for _, groupID := range input.ShareGroupIDs {
+		if _, err := tx.Exec(`INSERT INTO interval_share_groups (interval_id, share_group_id) VALUES (?, ?)`, id, groupID); err != nil {
+			return Interval{}, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Interval{}, err
+	}
+
+	return intervalByID(db, userID, id)
 }
 
-func updateInterval(db *sql.DB, userID, id int64, iv Interval) error {
-	if iv.Color == "" {
-		iv.Color = "#4f8ef7"
+func updateInterval(db *sql.DB, userID, id int64, input intervalInput) error {
+	if input.Color == "" {
+		input.Color = "#4f8ef7"
 	}
-	res, err := db.Exec(
-		`UPDATE intervals SET name=?, start_date=?, end_date=?, color=?, share_group_id=?, visibility='private' WHERE id=? AND user_id=?`,
-		iv.Name, iv.StartDate, iv.EndDate, iv.Color, iv.ShareGroupID, id, userID,
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(
+		`UPDATE intervals SET name=?, start_date=?, end_date=?, color=? WHERE id=? AND user_id=?`,
+		input.Name, input.StartDate, input.EndDate, input.Color, id, userID,
 	)
 	if err != nil {
 		return err
 	}
-	rows, err := res.RowsAffected()
+	n, err := res.RowsAffected()
 	if err != nil {
 		return err
 	}
-	if rows == 0 {
+	if n == 0 {
 		return ErrNotFound
 	}
-	return nil
+
+	if _, err := tx.Exec(`DELETE FROM interval_share_groups WHERE interval_id=?`, id); err != nil {
+		return err
+	}
+	for _, groupID := range input.ShareGroupIDs {
+		if _, err := tx.Exec(`INSERT INTO interval_share_groups (interval_id, share_group_id) VALUES (?, ?)`, id, groupID); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 func intervalByID(db *sql.DB, userID, id int64) (Interval, error) {
-	row := db.QueryRow(
-		`SELECT i.id, i.name, i.start_date, i.end_date, i.color, i.position, sg.id, sg.name, sg.public_slug
-		FROM intervals i
-		LEFT JOIN share_groups sg ON sg.id = i.share_group_id
-		WHERE i.id=? AND i.user_id=?`,
-		id,
-		userID,
-	)
-
 	var iv Interval
-	var shareGroupID sql.NullInt64
-	var shareGroupName sql.NullString
-	var shareGroupSlug sql.NullString
-	err := row.Scan(&iv.ID, &iv.Name, &iv.StartDate, &iv.EndDate, &iv.Color, &iv.Position, &shareGroupID, &shareGroupName, &shareGroupSlug)
+	err := db.QueryRow(
+		`SELECT id, name, start_date, end_date, color, position FROM intervals WHERE id=? AND user_id=?`,
+		id, userID,
+	).Scan(&iv.ID, &iv.Name, &iv.StartDate, &iv.EndDate, &iv.Color, &iv.Position)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Interval{}, ErrNotFound
 		}
 		return Interval{}, err
 	}
-	if shareGroupID.Valid {
-		id := shareGroupID.Int64
-		iv.ShareGroupID = &id
-		iv.ShareGroupName = shareGroupName.String
-		iv.ShareGroupSlug = shareGroupSlug.String
-	}
-	return iv, nil
-}
-
-func scanIntervalRow(scanner interface {
-	Scan(dest ...any) error
-}) (Interval, error) {
-	var iv Interval
-	var shareGroupID sql.NullInt64
-	var shareGroupName sql.NullString
-	var shareGroupSlug sql.NullString
-	if err := scanner.Scan(&iv.ID, &iv.Name, &iv.StartDate, &iv.EndDate, &iv.Color, &iv.Position, &shareGroupID, &shareGroupName, &shareGroupSlug); err != nil {
+	groups, err := intervalGroupsByID(db, id)
+	if err != nil {
 		return Interval{}, err
 	}
-	if shareGroupID.Valid {
-		id := shareGroupID.Int64
-		iv.ShareGroupID = &id
-		iv.ShareGroupName = shareGroupName.String
-		iv.ShareGroupSlug = shareGroupSlug.String
-	}
+	iv.ShareGroups = groups
 	return iv, nil
 }
 

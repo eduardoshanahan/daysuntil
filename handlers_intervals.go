@@ -33,17 +33,17 @@ func (h *handler) createInterval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var iv Interval
-	if err := decodeJSONBody(w, r, &iv); err != nil {
+	var input intervalInput
+	if err := decodeJSONBody(w, r, &input); err != nil {
 		return
 	}
-	groupID, err := validateInterval(iv, h.db, user.ID)
+	groupIDs, err := validateInterval(input, h.db, user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	iv.ShareGroupID = groupID
-	created, err := createInterval(h.db, user.ID, iv)
+	input.ShareGroupIDs = groupIDs
+	created, err := createInterval(h.db, user.ID, input)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -64,17 +64,17 @@ func (h *handler) updateInterval(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	var iv Interval
-	if err := decodeJSONBody(w, r, &iv); err != nil {
+	var input intervalInput
+	if err := decodeJSONBody(w, r, &input); err != nil {
 		return
 	}
-	groupID, err := validateInterval(iv, h.db, user.ID)
+	groupIDs, err := validateInterval(input, h.db, user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	iv.ShareGroupID = groupID
-	if err := updateInterval(h.db, user.ID, id, iv); err != nil {
+	input.ShareGroupIDs = groupIDs
+	if err := updateInterval(h.db, user.ID, id, input); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return

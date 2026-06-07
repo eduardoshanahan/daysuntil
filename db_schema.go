@@ -8,15 +8,13 @@ func initDB(db *sql.DB) error {
 	}
 
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS intervals (
-		id             INTEGER PRIMARY KEY AUTOINCREMENT,
-		user_id        INTEGER,
-		name           TEXT NOT NULL,
-		start_date     TEXT NOT NULL,
-		end_date       TEXT NOT NULL,
-		color          TEXT NOT NULL DEFAULT '#4f8ef7',
-		position       INTEGER NOT NULL DEFAULT 0,
-		visibility     TEXT NOT NULL DEFAULT 'private',
-		share_group_id INTEGER,
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id    INTEGER,
+		name       TEXT NOT NULL,
+		start_date TEXT NOT NULL,
+		end_date   TEXT NOT NULL,
+		color      TEXT NOT NULL DEFAULT '#4f8ef7',
+		position   INTEGER NOT NULL DEFAULT 0,
 		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 	)`)
 	if err != nil {
@@ -29,13 +27,7 @@ func initDB(db *sql.DB) error {
 	if err := ensureIntervalColumn(db, "user_id", "ALTER TABLE intervals ADD COLUMN user_id INTEGER"); err != nil {
 		return err
 	}
-	if err := ensureIntervalColumn(db, "visibility", "ALTER TABLE intervals ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'"); err != nil {
-		return err
-	}
 	if err := ensureIntervalColumn(db, "position", "ALTER TABLE intervals ADD COLUMN position INTEGER NOT NULL DEFAULT 0"); err != nil {
-		return err
-	}
-	if err := ensureIntervalColumn(db, "share_group_id", "ALTER TABLE intervals ADD COLUMN share_group_id INTEGER"); err != nil {
 		return err
 	}
 	if err := backfillIntervalPositions(db); err != nil {
@@ -43,10 +35,6 @@ func initDB(db *sql.DB) error {
 	}
 
 	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_intervals_user_id_start_date ON intervals(user_id, start_date)`)
-	if err != nil {
-		return err
-	}
-	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_intervals_share_group_id ON intervals(share_group_id)`)
 	if err != nil {
 		return err
 	}
@@ -67,6 +55,21 @@ func initDB(db *sql.DB) error {
 		return err
 	}
 	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_share_groups_user_id ON share_groups(user_id)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS interval_share_groups (
+		interval_id    INTEGER NOT NULL,
+		share_group_id INTEGER NOT NULL,
+		PRIMARY KEY(interval_id, share_group_id),
+		FOREIGN KEY(interval_id) REFERENCES intervals(id) ON DELETE CASCADE,
+		FOREIGN KEY(share_group_id) REFERENCES share_groups(id) ON DELETE CASCADE
+	)`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_interval_share_groups_share_group_id ON interval_share_groups(share_group_id)`)
 	if err != nil {
 		return err
 	}

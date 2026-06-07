@@ -3,15 +3,13 @@ package main
 import "errors"
 
 type Interval struct {
-	ID             int64  `json:"id"`
-	Name           string `json:"name"`
-	StartDate      string `json:"start_date"`
-	EndDate        string `json:"end_date"`
-	Color          string `json:"color"`
-	Position       int    `json:"position"`
-	ShareGroupID   *int64 `json:"share_group_id"`
-	ShareGroupName string `json:"share_group_name,omitempty"`
-	ShareGroupSlug string `json:"share_group_slug,omitempty"`
+	ID          int64        `json:"id"`
+	Name        string       `json:"name"`
+	StartDate   string       `json:"start_date"`
+	EndDate     string       `json:"end_date"`
+	Color       string       `json:"color"`
+	Position    int          `json:"position"`
+	ShareGroups []ShareGroup `json:"share_groups"`
 }
 
 type ShareGroup struct {

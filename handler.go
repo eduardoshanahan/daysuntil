@@ -20,6 +20,14 @@ type moveIntervalPayload struct {
 	Direction string `json:"direction"`
 }
 
+type intervalInput struct {
+	Name          string  `json:"name"`
+	StartDate     string  `json:"start_date"`
+	EndDate       string  `json:"end_date"`
+	Color         string  `json:"color"`
+	ShareGroupIDs []int64 `json:"share_group_ids"`
+}
+
 type versionResponse struct {
 	Version string `json:"version"`
 }

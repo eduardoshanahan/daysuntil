@@ -151,7 +151,7 @@ func TestInitDBAddsColumnsToLegacySchema(t *testing.T) {
 		t.Fatalf("init db: %v", err)
 	}
 
-	for _, column := range []string{"color", "user_id", "visibility", "share_group_id"} {
+	for _, column := range []string{"color", "user_id"} {
 		exists, err := intervalColumnExists(db, column)
 		if err != nil {
 			t.Fatalf("check %s column: %v", column, err)
@@ -214,7 +214,7 @@ func TestValidateIntervalRejectsEndDateBeforeStartDate(t *testing.T) {
 		t.Fatalf("init db: %v", err)
 	}
 
-	_, err := validateInterval(Interval{
+	_, err := validateInterval(intervalInput{
 		Name:      "Test",
 		StartDate: "2026-05-20",
 		EndDate:   "2026-05-19",
@@ -230,7 +230,7 @@ func TestValidateIntervalAllowsSameDayRange(t *testing.T) {
 		t.Fatalf("init db: %v", err)
 	}
 
-	_, err := validateInterval(Interval{
+	_, err := validateInterval(intervalInput{
 		Name:      "Test",
 		StartDate: "2026-05-20",
 		EndDate:   "2026-05-20",
@@ -371,7 +371,7 @@ func TestUsersOnlySeeTheirOwnIntervals(t *testing.T) {
 		"start_date":"2026-05-20",
 		"end_date":"2026-05-21",
 		"color":"#4f8ef7",
-		"share_group_id":null
+		"share_group_ids":[]
 	}`, aliceCookie)
 	if createAlice.Code != http.StatusCreated {
 		t.Fatalf("create alice interval: expected 201, got %d (%s)", createAlice.Code, createAlice.Body.String())
@@ -382,7 +382,7 @@ func TestUsersOnlySeeTheirOwnIntervals(t *testing.T) {
 		"start_date":"2026-06-20",
 		"end_date":"2026-06-21",
 		"color":"#e05c5c",
-		"share_group_id":`+strconv.FormatInt(bobGroup.ID, 10)+`
+		"share_group_ids":[`+strconv.FormatInt(bobGroup.ID, 10)+`]
 	}`, bobCookie)
 	if createBob.Code != http.StatusCreated {
 		t.Fatalf("create bob interval: expected 201, got %d (%s)", createBob.Code, createBob.Body.String())
@@ -513,7 +513,7 @@ func TestIntervalsCanBeAssignedToShareGroup(t *testing.T) {
 		"start_date":"2026-05-20",
 		"end_date":"2026-05-21",
 		"color":"#4f8ef7",
-		"share_group_id":`+strconv.FormatInt(group.ID, 10)+`
+		"share_group_ids":[`+strconv.FormatInt(group.ID, 10)+`]
 	}`, cookie)
 	if create.Code != http.StatusCreated {
 		t.Fatalf("expected 201 creating interval, got %d (%s)", create.Code, create.Body.String())
@@ -523,11 +523,11 @@ func TestIntervalsCanBeAssignedToShareGroup(t *testing.T) {
 	if err := json.NewDecoder(create.Body).Decode(&interval); err != nil {
 		t.Fatalf("decode interval: %v", err)
 	}
-	if interval.ShareGroupID == nil || *interval.ShareGroupID != group.ID {
+	if len(interval.ShareGroups) != 1 || interval.ShareGroups[0].ID != group.ID {
 		t.Fatalf("expected share group assignment, got %#v", interval)
 	}
-	if interval.ShareGroupName != "Trips" {
-		t.Fatalf("expected share group name Trips, got %q", interval.ShareGroupName)
+	if interval.ShareGroups[0].Name != "Trips" {
+		t.Fatalf("expected share group name Trips, got %q", interval.ShareGroups[0].Name)
 	}
 }
 
@@ -548,7 +548,7 @@ func TestPublicShareGroupShowsOnlyAssignedIntervals(t *testing.T) {
 		"start_date":"2026-05-20",
 		"end_date":"2026-05-21",
 		"color":"#4f8ef7",
-		"share_group_id":null
+		"share_group_ids":[]
 	}`, cookie)
 	if privateInterval.Code != http.StatusCreated {
 		t.Fatalf("expected 201 creating private interval, got %d", privateInterval.Code)
@@ -559,7 +559,7 @@ func TestPublicShareGroupShowsOnlyAssignedIntervals(t *testing.T) {
 		"start_date":"2026-06-20",
 		"end_date":"2026-06-21",
 		"color":"#e05c5c",
-		"share_group_id":`+strconv.FormatInt(group.ID, 10)+`
+		"share_group_ids":[`+strconv.FormatInt(group.ID, 10)+`]
 	}`, cookie)
 	if publicInterval.Code != http.StatusCreated {
 		t.Fatalf("expected 201 creating grouped interval, got %d", publicInterval.Code)
@@ -609,7 +609,7 @@ func TestDeletingShareGroupMakesItsIntervalsPrivate(t *testing.T) {
 		"start_date":"2026-05-20",
 		"end_date":"2026-05-21",
 		"color":"#4f8ef7",
-		"share_group_id":`+strconv.FormatInt(group.ID, 10)+`
+		"share_group_ids":[`+strconv.FormatInt(group.ID, 10)+`]
 	}`, cookie)
 	if create.Code != http.StatusCreated {
 		t.Fatalf("expected 201 creating interval, got %d (%s)", create.Code, create.Body.String())
@@ -632,8 +632,8 @@ func TestDeletingShareGroupMakesItsIntervalsPrivate(t *testing.T) {
 	if len(intervals) != 1 {
 		t.Fatalf("expected 1 interval, got %d", len(intervals))
 	}
-	if intervals[0].ShareGroupID != nil {
-		t.Fatalf("expected interval to become private, got %#v", intervals[0])
+	if len(intervals[0].ShareGroups) != 0 {
+		t.Fatalf("expected interval to have no groups after deletion, got %#v", intervals[0])
 	}
 }
 
@@ -648,7 +648,7 @@ func TestMoveIntervalReordersList(t *testing.T) {
 			"start_date":"2026-05-20",
 			"end_date":"2026-05-21",
 			"color":"#4f8ef7",
-			"share_group_id":null
+			"share_group_ids":[]
 		}`, cookie)
 		if create.Code != http.StatusCreated {
 			t.Fatalf("expected 201 creating interval %q, got %d (%s)", name, create.Code, create.Body.String())
@@ -685,7 +685,7 @@ func TestMoveIntervalNormalizesLegacyZeroPositions(t *testing.T) {
 			"start_date":"2026-05-20",
 			"end_date":"2026-05-21",
 			"color":"#4f8ef7",
-			"share_group_id":null
+			"share_group_ids":[]
 		}`, cookie)
 		if create.Code != http.StatusCreated {
 			t.Fatalf("expected 201 creating interval %q, got %d (%s)", name, create.Code, create.Body.String())
@@ -968,7 +968,7 @@ func TestDeleteAccountRemovesUserIntervalsGroupsAndSession(t *testing.T) {
 		"start_date":"2026-05-20",
 		"end_date":"2026-05-21",
 		"color":"#4f8ef7",
-		"share_group_id":`+strconv.FormatInt(group.ID, 10)+`
+		"share_group_ids":[`+strconv.FormatInt(group.ID, 10)+`]
 	}`, cookie)
 	if create.Code != http.StatusCreated {
 		t.Fatalf("expected 201 creating interval, got %d (%s)", create.Code, create.Body.String())

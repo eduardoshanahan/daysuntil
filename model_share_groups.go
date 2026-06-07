@@ -82,16 +82,7 @@ func updateShareGroup(db *sql.DB, userID, groupID int64, name string) (ShareGrou
 }
 
 func deleteShareGroup(db *sql.DB, userID, groupID int64) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec(`UPDATE intervals SET share_group_id=NULL, visibility='private' WHERE user_id=? AND share_group_id=?`, userID, groupID); err != nil {
-		return err
-	}
-	res, err := tx.Exec(`DELETE FROM share_groups WHERE id=? AND user_id=?`, groupID, userID)
+	res, err := db.Exec(`DELETE FROM share_groups WHERE id=? AND user_id=?`, groupID, userID)
 	if err != nil {
 		return err
 	}
@@ -102,7 +93,7 @@ func deleteShareGroup(db *sql.DB, userID, groupID int64) error {
 	if rows == 0 {
 		return ErrNotFound
 	}
-	return tx.Commit()
+	return nil
 }
 
 func rotateShareGroupSlug(db *sql.DB, userID, groupID int64) (ShareGroup, error) {
@@ -139,28 +130,30 @@ func shareGroupByID(db *sql.DB, userID, groupID int64) (ShareGroup, error) {
 	return group, nil
 }
 
-func shareGroupOwnedByUser(db *sql.DB, userID int64, groupID *int64) (*int64, error) {
-	if groupID == nil {
-		return nil, nil
-	}
-	var existing int64
-	err := db.QueryRow(`SELECT id FROM share_groups WHERE id=? AND user_id=?`, *groupID, userID).Scan(&existing)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+func shareGroupsOwnedByUser(db *sql.DB, userID int64, groupIDs []int64) ([]int64, error) {
+	var verified []int64
+	for _, groupID := range groupIDs {
+		var existing int64
+		err := db.QueryRow(`SELECT id FROM share_groups WHERE id=? AND user_id=?`, groupID, userID).Scan(&existing)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, ErrNotFound
+			}
+			return nil, err
 		}
-		return nil, err
+		verified = append(verified, existing)
 	}
-	return &existing, nil
+	return verified, nil
 }
 
 func publicShareGroupBySlug(db *sql.DB, groupSlug string) (PublicShareGroup, error) {
 	var profile PublicShareGroup
 	rows, err := db.Query(
 		`SELECT sg.name, sg.public_slug, u.username, u.display_name, i.id, i.name, i.start_date, i.end_date, i.color
-		FROM intervals i
-		JOIN share_groups sg ON sg.id = i.share_group_id
+		FROM interval_share_groups isg
+		JOIN share_groups sg ON sg.id = isg.share_group_id
 		JOIN users u ON u.id = sg.user_id
+		JOIN intervals i ON i.id = isg.interval_id
 		WHERE sg.public_slug=?
 		ORDER BY i.start_date`,
 		groupSlug,
