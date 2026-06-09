@@ -14,21 +14,7 @@ const {
   appStatus,
   appVersion,
   appView,
-  authEmail,
   authError,
-  authForm,
-  authGithub,
-  authKicker,
-  authMagicLink,
-  authOAuth,
-  authPassword,
-  authPasswordRow,
-  authResendVerification,
-  authSubmit,
-  authSubtitle,
-  authSwitch,
-  authSwitchLabel,
-  authTitle,
   authView,
   usernameForm,
   usernameInput,
@@ -97,12 +83,9 @@ const {
 const { escHtml } = window.DaysUntilUtils;
 
 let isSubmitting = false;
-let isAuthSubmitting = false;
 let isProfileSubmitting = false;
 let isShareGroupSubmitting = false;
 let isUsernameSubmitting = false;
-let isRegisterMode = false;
-let isMagicLinkEnabled = false;
 let activeLoadToken = 0;
 const pendingDeleteIds = new Set();
 let lastFocusedElement = null;
@@ -363,8 +346,6 @@ function setCurrentUser(user) {
       usernameDisplayValue.textContent = user.username;
     }
     updateManagementSummaries();
-    authEmail.value = '';
-    authPassword.value = '';
     clearAuthError();
   } else {
     userBadge.textContent = '';
@@ -654,35 +635,6 @@ function showAuthError(message) {
 function clearAuthError() {
   authError.textContent = '';
   authError.classList.add('hidden');
-  authResendVerification.classList.add('hidden');
-}
-
-function setAuthMode(registerMode) {
-  isRegisterMode = registerMode;
-  authKicker.textContent = registerMode ? 'Create account' : 'Login';
-  authTitle.textContent = registerMode ? 'Create your account' : 'Sign in to your account';
-  authSubtitle.textContent = registerMode
-    ? 'Create an account with your email and password.'
-    : 'Sign in with your email and password.';
-  authSubmit.textContent = registerMode ? 'Create account' : 'Log in';
-  authSwitchLabel.textContent = registerMode ? 'Already have an account?' : 'Need an account?';
-  authSwitch.textContent = registerMode ? 'Log in instead' : 'Create one';
-  authPassword.required = true;
-  authEmail.autocomplete = 'email';
-  authPassword.autocomplete = registerMode ? 'new-password' : 'current-password';
-  authMagicLink.classList.toggle('hidden', registerMode || !isMagicLinkEnabled);
-  clearAuthError();
-}
-
-function setAuthSubmitting(nextValue) {
-  isAuthSubmitting = nextValue;
-  authSubmit.disabled = nextValue;
-  authSwitch.disabled = nextValue;
-  authEmail.disabled = nextValue;
-  authPassword.disabled = nextValue;
-  authMagicLink.disabled = nextValue;
-  authGithub.classList.toggle('disabled', nextValue);
-  authGithub.setAttribute('aria-disabled', nextValue ? 'true' : 'false');
 }
 
 function setUsernameSubmitting(nextValue) {
@@ -774,9 +726,7 @@ function handleUnauthorized(message) {
   setCurrentUser(null);
   clearStatus();
   list.innerHTML = '<p id="loading-msg" class="empty-msg">Loading intervals...</p>';
-  setAuthMode(false);
   showAuthError(message);
-  authEmail.focus();
 }
 
 async function confirmDelete(iv) {
@@ -1009,24 +959,6 @@ btnRetry.addEventListener('click', () => {
       .catch(err => showStatus(err.message, { retry: true, tone: 'error' }));
   }
 });
-authSwitch.addEventListener('click', () => {
-  setAuthMode(!isRegisterMode);
-  authEmail.focus();
-});
-authResendVerification.addEventListener('click', async () => {
-  const email = authResendVerification.dataset.email || authEmail.value.trim();
-  if (!email) return;
-  authResendVerification.disabled = true;
-  try {
-    await api.resendVerification({ email });
-    showAuthError('Verification email sent. Check your inbox.');
-    authResendVerification.classList.add('hidden');
-  } catch (err) {
-    showAuthError(err.message);
-  } finally {
-    authResendVerification.disabled = false;
-  }
-});
 overlay.addEventListener('click', event => {
   if (event.target === overlay) closeModal();
 });
@@ -1092,67 +1024,6 @@ shareGroupsPanel.addEventListener('toggle', () => {
   groupsBadge.setAttribute('aria-expanded', shareGroupsPanel.open ? 'true' : 'false');
   if (!shareGroupsPanel.open) {
     shareGroupsPanel.classList.add('hidden');
-  }
-});
-
-authForm.addEventListener('submit', async event => {
-  event.preventDefault();
-  if (isAuthSubmitting) return;
-
-  clearAuthError();
-  const email = authEmail.value.trim();
-  const password = authPassword.value;
-  if (!email) return showAuthError('Email is required.');
-  if (!password) return showAuthError('Password is required.');
-
-  try {
-    setAuthSubmitting(true);
-    if (isRegisterMode) {
-      const result = await api.register({ email, password });
-      if (!result || !result.id) {
-        showAuthError(result?.message || 'Check your email to verify your account before signing in.');
-        return;
-      }
-      setCurrentUser(result);
-      clearStatus();
-      list.innerHTML = '<p id="loading-msg" class="empty-msg">Loading intervals...</p>';
-      await loadShareGroups();
-      await loadIntervals();
-    } else {
-      const user = await api.login({ email, password });
-      setCurrentUser(user);
-      clearStatus();
-      list.innerHTML = '<p id="loading-msg" class="empty-msg">Loading intervals...</p>';
-      await loadShareGroups();
-      await loadIntervals();
-    }
-  } catch (err) {
-    if (err.status === 403) {
-      showAuthError(err.message);
-      authResendVerification.classList.remove('hidden');
-      authResendVerification.dataset.email = email;
-    } else {
-      showAuthError(err.message);
-    }
-  } finally {
-    setAuthSubmitting(false);
-  }
-});
-
-authMagicLink.addEventListener('click', async () => {
-  if (isAuthSubmitting) return;
-  const email = authEmail.value.trim();
-  if (!email) return showAuthError('Enter your email first.');
-
-  clearAuthError();
-  try {
-    setAuthSubmitting(true);
-    await api.requestLoginLink({ email });
-    showAuthError('If that email has an account, a sign-in link is on its way.');
-  } catch (err) {
-    showAuthError(err.message);
-  } finally {
-    setAuthSubmitting(false);
   }
 });
 
@@ -1306,11 +1177,8 @@ colorSwatches.addEventListener('click', event => {
 });
 
 async function initPrivateApp() {
-  setAuthMode(false);
   const params = new URLSearchParams(window.location.search);
   const authErrorMessage = params.get('auth_error');
-  const loginToken = params.get('login_token');
-  const verifyToken = params.get('verify_token');
 
   try {
     const build = await api.version();
@@ -1319,49 +1187,22 @@ async function initPrivateApp() {
     setVersionLabel('dev');
   }
 
-  try {
-    const providers = await api.providers();
-    isMagicLinkEnabled = !!providers.magic_link_enabled;
-    authOAuth.classList.toggle('hidden', !providers.github_enabled);
-    setAuthMode(false);
-  } catch {
-    authOAuth.classList.add('hidden');
-    isMagicLinkEnabled = false;
-    setAuthMode(false);
+  if (authErrorMessage) {
+    showAuthError(authErrorMessage);
+    window.history.replaceState({}, '', window.location.pathname);
   }
 
   try {
-    let user;
-    if (loginToken) {
-      user = await api.consumeLoginLink({ token: loginToken });
-    } else if (verifyToken) {
-      user = await api.verifyEmail({ token: verifyToken });
-    } else {
-      user = await api.me();
-    }
+    const user = await api.me();
     setCurrentUser(user);
-    if (loginToken || verifyToken) {
-      window.history.replaceState({}, '', window.location.pathname);
-    }
     await loadShareGroups();
     await loadIntervals();
   } catch (err) {
     setCurrentUser(null);
     authView.classList.remove('hidden');
-    if (loginToken) {
-      showAuthError('This sign-in link is invalid or expired.');
-      window.history.replaceState({}, '', window.location.pathname);
-    } else if (verifyToken) {
-      showAuthError('This verification link is invalid or expired. Request a new one below.');
-      authResendVerification.classList.remove('hidden');
-      window.history.replaceState({}, '', window.location.pathname);
-    } else if (authErrorMessage) {
-      showAuthError(authErrorMessage);
-      window.history.replaceState({}, '', window.location.pathname);
-    } else if (err.status !== 401) {
+    if (!authErrorMessage && err.status !== 401) {
       showAuthError(err.message);
     }
-    authEmail.focus();
   }
 }
 

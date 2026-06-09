@@ -6,31 +6,20 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"net/mail"
 	"net/url"
 	"os"
 	"strings"
 	"time"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 const (
-	sessionCookieName       = "daysuntil_session"
-	oauthStateCookie        = "daysuntil_oauth_state"
-	sessionTTL              = 30 * 24 * time.Hour
-	magicLinkTTL            = 15 * time.Minute
-	emailVerificationTTL    = 24 * time.Hour
+	sessionCookieName = "daysuntil_session"
+	oidcStateCookie   = "daysuntil_oidc_state"
+	sessionTTL        = 30 * 24 * time.Hour
 )
-
-var errUserNotFound = errors.New("user not found")
-var errWrongPassword = errors.New("wrong password")
-var errEmailNotVerified = errors.New("email not verified")
 
 type contextKey string
 
@@ -44,67 +33,24 @@ type User struct {
 	UsernameSet bool   `json:"username_set"`
 }
 
-type registerCredentials struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
-
-type loginCredentials struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
-
-type magicLinkRequest struct {
-	Email string `json:"email"`
-}
-
-type magicLinkConsumeRequest struct {
-	Token string `json:"token"`
-}
-
-type githubOAuthConfig struct {
-	ClientID     string
-	ClientSecret string
-	CallbackURL  string
-	AuthorizeURL string
-	TokenURL     string
-	UserURL      string
-}
-
-type authProvidersResponse struct {
-	GitHubEnabled    bool `json:"github_enabled"`
-	MagicLinkEnabled bool `json:"magic_link_enabled"`
-}
-
-type githubOAuthUser struct {
-	ID    int64  `json:"id"`
-	Login string `json:"login"`
-}
-
-type githubTokenResponse struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	Scope       string `json:"scope"`
-	Error       string `json:"error"`
-}
-
 func initAuthDB(db *sql.DB) error {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS users (
-		id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-		email                 TEXT NOT NULL DEFAULT '',
-		username              TEXT NOT NULL UNIQUE,
-		public_slug           TEXT NOT NULL DEFAULT '',
-		display_name          TEXT NOT NULL DEFAULT '',
-		password_hash         TEXT NOT NULL,
-		auth_provider         TEXT NOT NULL DEFAULT '',
-		auth_provider_user_id TEXT NOT NULL DEFAULT '',
-		created_at            TEXT NOT NULL,
-		username_set          INTEGER NOT NULL DEFAULT 0
+		id           INTEGER PRIMARY KEY AUTOINCREMENT,
+		zitadel_sub  TEXT NOT NULL DEFAULT '',
+		email        TEXT NOT NULL DEFAULT '',
+		username     TEXT NOT NULL UNIQUE,
+		public_slug  TEXT NOT NULL DEFAULT '',
+		display_name TEXT NOT NULL DEFAULT '',
+		created_at   TEXT NOT NULL,
+		username_set INTEGER NOT NULL DEFAULT 0
 	)`)
 	if err != nil {
 		return err
 	}
 
+	if err := ensureUserColumn(db, "zitadel_sub", "ALTER TABLE users ADD COLUMN zitadel_sub TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := ensureUserColumn(db, "display_name", "ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
@@ -114,42 +60,11 @@ func initAuthDB(db *sql.DB) error {
 	if err := ensureUserColumn(db, "public_slug", "ALTER TABLE users ADD COLUMN public_slug TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	if err := ensureUserColumn(db, "auth_provider", "ALTER TABLE users ADD COLUMN auth_provider TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := ensureUserColumn(db, "auth_provider_user_id", "ALTER TABLE users ADD COLUMN auth_provider_user_id TEXT NOT NULL DEFAULT ''"); err != nil {
+	if err := ensureUserColumn(db, "username_set", "ALTER TABLE users ADD COLUMN username_set INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 
-	emailVerifiedExists, err := tableColumnExists(db, "users", "email_verified")
-	if err != nil {
-		return err
-	}
-	if !emailVerifiedExists {
-		if _, err := db.Exec("ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0"); err != nil {
-			return err
-		}
-		// Mark all pre-existing users as verified — they existed before email verification was added
-		if _, err := db.Exec(`UPDATE users SET email_verified=1`); err != nil {
-			return err
-		}
-	}
-
-	usernameSetExists, err := tableColumnExists(db, "users", "username_set")
-	if err != nil {
-		return err
-	}
-	if !usernameSetExists {
-		if _, err := db.Exec("ALTER TABLE users ADD COLUMN username_set INTEGER NOT NULL DEFAULT 0"); err != nil {
-			return err
-		}
-		// All pre-existing users already chose a username at registration
-		if _, err := db.Exec(`UPDATE users SET username_set=1`); err != nil {
-			return err
-		}
-	}
-
-	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_provider_identity ON users(auth_provider, auth_provider_user_id) WHERE auth_provider <> '' AND auth_provider_user_id <> ''`)
+	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_zitadel_sub ON users(zitadel_sub) WHERE zitadel_sub <> ''`)
 	if err != nil {
 		return err
 	}
@@ -183,50 +98,6 @@ func initAuthDB(db *sql.DB) error {
 		return err
 	}
 
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS login_tokens (
-		id         TEXT PRIMARY KEY,
-		user_id    INTEGER NOT NULL,
-		expires_at TEXT NOT NULL,
-		used_at    TEXT NOT NULL DEFAULT '',
-		created_at TEXT NOT NULL,
-		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-	)`)
-	if err != nil {
-		return err
-	}
-
-	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_login_tokens_user_id ON login_tokens(user_id)`)
-	if err != nil {
-		return err
-	}
-
-	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_login_tokens_expires_at ON login_tokens(expires_at)`)
-	if err != nil {
-		return err
-	}
-
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS email_verification_tokens (
-		id         TEXT PRIMARY KEY,
-		user_id    INTEGER NOT NULL,
-		expires_at TEXT NOT NULL,
-		used_at    TEXT NOT NULL DEFAULT '',
-		created_at TEXT NOT NULL,
-		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-	)`)
-	if err != nil {
-		return err
-	}
-
-	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user_id ON email_verification_tokens(user_id)`)
-	if err != nil {
-		return err
-	}
-
-	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_expires_at ON email_verification_tokens(expires_at)`)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -240,30 +111,6 @@ func ensureUserColumn(db *sql.DB, column, statement string) error {
 	}
 	_, err = db.Exec(statement)
 	return err
-}
-
-func normalizeEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
-}
-
-func validateEmail(email string) (string, error) {
-	email = normalizeEmail(email)
-	if email == "" {
-		return "", fmt.Errorf("email is required")
-	}
-	if len(email) > 254 {
-		return "", fmt.Errorf("email must be at most 254 characters")
-	}
-
-	addr, err := mail.ParseAddress(email)
-	if err != nil || !strings.EqualFold(addr.Address, email) {
-		return "", fmt.Errorf("email must be a valid address")
-	}
-	parts := strings.SplitN(addr.Address, "@", 2)
-	if len(parts) != 2 || !strings.Contains(parts[1], ".") {
-		return "", fmt.Errorf("email must be a valid address")
-	}
-	return email, nil
 }
 
 func validateUsername(username string) (string, error) {
@@ -289,24 +136,6 @@ func validateUsername(username string) (string, error) {
 	return username, nil
 }
 
-func validatePassword(password string) error {
-	if len(password) < 8 {
-		return fmt.Errorf("password must be at least 8 characters")
-	}
-	return nil
-}
-
-func validateRegistration(creds registerCredentials) (string, error) {
-	email, err := validateEmail(creds.Email)
-	if err != nil {
-		return "", err
-	}
-	if err := validatePassword(creds.Password); err != nil {
-		return "", err
-	}
-	return email, nil
-}
-
 func randomPlaceholderUsername() (string, error) {
 	buf := make([]byte, 8)
 	if _, err := rand.Read(buf); err != nil {
@@ -315,19 +144,22 @@ func randomPlaceholderUsername() (string, error) {
 	return fmt.Sprintf("pending-%x", buf), nil
 }
 
-func emailLocalPart(email string) string {
-	parts := strings.SplitN(email, "@", 2)
-	return parts[0]
-}
-
-func createUser(db *sql.DB, creds registerCredentials) (User, error) {
-	email, err := validateRegistration(creds)
-	if err != nil {
-		return User{}, err
+func findOrCreateZitadelUser(db *sql.DB, sub, email, displayName string) (User, error) {
+	if sub == "" {
+		return User{}, fmt.Errorf("zitadel sub is required")
 	}
 
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(creds.Password), bcrypt.DefaultCost)
-	if err != nil {
+	var user User
+	var usernameSet int
+	err := db.QueryRow(
+		`SELECT id, username, public_slug, display_name, username_set FROM users WHERE zitadel_sub=?`,
+		sub,
+	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &usernameSet)
+	if err == nil {
+		user.UsernameSet = usernameSet == 1
+		return user, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
 		return User{}, err
 	}
 
@@ -336,7 +168,9 @@ func createUser(db *sql.DB, creds registerCredentials) (User, error) {
 		return User{}, err
 	}
 
-	displayName := emailLocalPart(email)
+	if strings.TrimSpace(displayName) == "" {
+		displayName = "user"
+	}
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -350,12 +184,12 @@ func createUser(db *sql.DB, creds registerCredentials) (User, error) {
 	}
 
 	res, err := tx.Exec(
-		`INSERT INTO users (email, username, public_slug, display_name, password_hash, auth_provider, auth_provider_user_id, created_at, username_set) VALUES (?, ?, '', ?, ?, '', '', ?, 0)`,
-		email, placeholderUsername, displayName, string(passwordHash), time.Now().UTC().Format(time.RFC3339),
+		`INSERT INTO users (zitadel_sub, email, username, display_name, created_at, username_set) VALUES (?, ?, ?, ?, ?, 0)`,
+		sub, email, placeholderUsername, displayName, time.Now().UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return User{}, fmt.Errorf("account could not be created with those details")
+			return findOrCreateZitadelUser(db, sub, email, displayName)
 		}
 		return User{}, err
 	}
@@ -366,8 +200,7 @@ func createUser(db *sql.DB, creds registerCredentials) (User, error) {
 	}
 
 	if userCount == 0 {
-		_, err = tx.Exec(`UPDATE intervals SET user_id=? WHERE user_id IS NULL`, userID)
-		if err != nil {
+		if _, err := tx.Exec(`UPDATE intervals SET user_id=? WHERE user_id IS NULL`, userID); err != nil {
 			return User{}, err
 		}
 	}
@@ -382,263 +215,6 @@ func createUser(db *sql.DB, creds registerCredentials) (User, error) {
 	}
 
 	return User{ID: userID, Username: placeholderUsername, DisplayName: displayName, PublicSlug: publicSlug, UsernameSet: false}, nil
-}
-
-func authenticateUser(db *sql.DB, creds loginCredentials) (User, error) {
-	email := normalizeEmail(creds.Email)
-	if email == "" || creds.Password == "" {
-		return User{}, fmt.Errorf("email and password are required")
-	}
-
-	var user User
-	var passwordHash string
-	var emailVerified int
-	var usernameSet int
-	err := db.QueryRow(
-		`SELECT id, username, public_slug, display_name, password_hash, email_verified, username_set FROM users WHERE email=?`,
-		email,
-	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &passwordHash, &emailVerified, &usernameSet)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return User{}, errUserNotFound
-		}
-		return User{}, err
-	}
-	user.UsernameSet = usernameSet == 1
-
-	if passwordHash == "" {
-		return user, errUserNotFound
-	}
-	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(creds.Password)); err != nil {
-		return user, errWrongPassword
-	}
-
-	if emailVerified == 0 {
-		return user, errEmailNotVerified
-	}
-
-	user.PublicSlug, err = ensurePublicSlug(db, user.ID, user.PublicSlug)
-	if err != nil {
-		return User{}, err
-	}
-
-	return user, nil
-}
-
-func authProviders(github githubOAuthConfig, magic magicLinkConfig) authProvidersResponse {
-	return authProvidersResponse{
-		GitHubEnabled:    github.Enabled(),
-		MagicLinkEnabled: magic.Enabled(),
-	}
-}
-
-func githubConfigFromEnv() githubOAuthConfig {
-	callbackURL := strings.TrimSpace(os.Getenv("GITHUB_CALLBACK_URL"))
-	if callbackURL == "" {
-		baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("BASE_URL")), "/")
-		if baseURL != "" {
-			callbackURL = baseURL + "/api/oauth/github/callback"
-		}
-	}
-
-	return githubOAuthConfig{
-		ClientID:     strings.TrimSpace(os.Getenv("GITHUB_CLIENT_ID")),
-		ClientSecret: strings.TrimSpace(os.Getenv("GITHUB_CLIENT_SECRET")),
-		CallbackURL:  callbackURL,
-		AuthorizeURL: "https://github.com/login/oauth/authorize",
-		TokenURL:     "https://github.com/login/oauth/access_token",
-		UserURL:      "https://api.github.com/user",
-	}
-}
-
-func (c githubOAuthConfig) Enabled() bool {
-	return c.ClientID != "" && c.ClientSecret != "" && c.CallbackURL != ""
-}
-
-func cookieSecureFromEnv(config githubOAuthConfig) (bool, error) {
-	configuredValue := strings.TrimSpace(os.Getenv("COOKIE_SECURE"))
-	httpsDeployment := urlUsesHTTPS(os.Getenv("BASE_URL")) || urlUsesHTTPS(config.CallbackURL)
-
-	switch configuredValue {
-	case "":
-		return httpsDeployment, nil
-	case "true":
-		return true, nil
-	case "false":
-		if httpsDeployment {
-			return false, fmt.Errorf("COOKIE_SECURE=false is not allowed when BASE_URL or GITHUB_CALLBACK_URL uses https")
-		}
-		return false, nil
-	default:
-		return false, fmt.Errorf("COOKIE_SECURE must be true, false, or unset")
-	}
-}
-
-func urlUsesHTTPS(rawURL string) bool {
-	rawURL = strings.TrimSpace(rawURL)
-	if rawURL == "" {
-		return false
-	}
-
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return false
-	}
-	return strings.EqualFold(parsed.Scheme, "https")
-}
-
-func findUserByProvider(db *sql.DB, provider, providerUserID string) (User, error) {
-	var user User
-	var usernameSet int
-	err := db.QueryRow(
-		`SELECT id, username, public_slug, display_name, username_set FROM users WHERE auth_provider=? AND auth_provider_user_id=?`,
-		provider, providerUserID,
-	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &usernameSet)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return User{}, ErrNotFound
-		}
-		return User{}, err
-	}
-	user.UsernameSet = usernameSet == 1
-	return user, nil
-}
-
-func findUserByEmail(db *sql.DB, email string) (User, error) {
-	email = normalizeEmail(email)
-	if email == "" {
-		return User{}, errUserNotFound
-	}
-
-	var user User
-	var usernameSet int
-	err := db.QueryRow(
-		`SELECT id, username, public_slug, display_name, username_set FROM users WHERE email=?`,
-		email,
-	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &usernameSet)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return User{}, errUserNotFound
-		}
-		return User{}, err
-	}
-	user.UsernameSet = usernameSet == 1
-
-	user.PublicSlug, err = ensurePublicSlug(db, user.ID, user.PublicSlug)
-	if err != nil {
-		return User{}, err
-	}
-
-	return user, nil
-}
-
-func findOrCreateOAuthUser(db *sql.DB, provider, providerUserID, providerLogin string) (User, error) {
-	user, err := findUserByProvider(db, provider, providerUserID)
-	if err == nil {
-		return user, nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return User{}, err
-	}
-
-	baseUsername := providerUsername(provider, providerLogin, providerUserID)
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	tx, err := db.Begin()
-	if err != nil {
-		return User{}, err
-	}
-	defer tx.Rollback()
-
-	var userCount int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&userCount); err != nil {
-		return User{}, err
-	}
-
-	username := baseUsername
-	for attempt := 2; ; attempt += 1 {
-		res, err := tx.Exec(
-			`INSERT INTO users (email, username, public_slug, display_name, password_hash, auth_provider, auth_provider_user_id, created_at, username_set) VALUES ('', ?, '', ?, '', ?, ?, ?, 1)`,
-			username, providerLogin, provider, providerUserID, now,
-		)
-		if err == nil {
-			userID, lastErr := res.LastInsertId()
-			if lastErr != nil {
-				return User{}, lastErr
-			}
-
-			if userCount == 0 {
-				_, lastErr = tx.Exec(`UPDATE intervals SET user_id=? WHERE user_id IS NULL`, userID)
-				if lastErr != nil {
-					return User{}, lastErr
-				}
-			}
-
-			if lastErr = tx.Commit(); lastErr != nil {
-				return User{}, lastErr
-			}
-
-			displayName := providerLogin
-			if strings.TrimSpace(displayName) == "" {
-				displayName = username
-			}
-			publicSlug, slugErr := ensurePublicSlug(db, userID, "")
-			if slugErr != nil {
-				return User{}, slugErr
-			}
-			return User{ID: userID, Username: username, DisplayName: displayName, PublicSlug: publicSlug, UsernameSet: true}, nil
-		}
-
-		errText := strings.ToLower(err.Error())
-		if strings.Contains(errText, "auth_provider") && strings.Contains(errText, "auth_provider_user_id") {
-			return findUserByProvider(db, provider, providerUserID)
-		}
-		if !strings.Contains(errText, "unique") {
-			return User{}, err
-		}
-
-		username = fmt.Sprintf("%s-%d", truncateUsername(baseUsername, 60), attempt)
-	}
-}
-
-func providerUsername(provider, login, providerUserID string) string {
-	normalized := normalizeExternalUsername(login)
-	if normalized == "" {
-		normalized = providerUserID
-	}
-	username := fmt.Sprintf("%s_%s", provider, normalized)
-	if len(username) > 64 {
-		return username[:64]
-	}
-	return username
-}
-
-func normalizeExternalUsername(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	var builder strings.Builder
-	lastDash := false
-
-	for _, r := range value {
-		valid := r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-'
-		if valid {
-			builder.WriteRune(r)
-			lastDash = false
-			continue
-		}
-		if !lastDash {
-			builder.WriteByte('-')
-			lastDash = true
-		}
-	}
-
-	return strings.Trim(builder.String(), "-")
-}
-
-func truncateUsername(value string, maxLen int) string {
-	if len(value) <= maxLen {
-		return value
-	}
-	return value[:maxLen]
 }
 
 func createSession(db *sql.DB, userID int64) (string, time.Time, error) {
@@ -660,37 +236,6 @@ func createSession(db *sql.DB, userID int64) (string, time.Time, error) {
 	return rawToken, expiresAt, nil
 }
 
-func createMagicLinkToken(db *sql.DB, userID int64) (string, time.Time, error) {
-	rawToken, err := randomToken(32)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-
-	expiresAt := time.Now().UTC().Add(magicLinkTTL)
-	tx, err := db.Begin()
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec(`DELETE FROM login_tokens WHERE user_id=?`, userID); err != nil {
-		return "", time.Time{}, err
-	}
-
-	if _, err := tx.Exec(
-		`INSERT INTO login_tokens (id, user_id, expires_at, used_at, created_at) VALUES (?, ?, ?, '', ?)`,
-		hashToken(rawToken), userID, expiresAt.Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339),
-	); err != nil {
-		return "", time.Time{}, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return "", time.Time{}, err
-	}
-
-	return rawToken, expiresAt, nil
-}
-
 func deleteSession(db *sql.DB, rawToken string) error {
 	if strings.TrimSpace(rawToken) == "" {
 		return nil
@@ -702,8 +247,8 @@ func deleteSession(db *sql.DB, rawToken string) error {
 func findUserBySession(db *sql.DB, rawToken string) (User, error) {
 	var user User
 	var expiresAt string
-
 	var usernameSet int
+
 	err := db.QueryRow(
 		`SELECT u.id, u.username, u.public_slug, u.display_name, u.username_set, s.expires_at
 		FROM sessions s
@@ -759,81 +304,6 @@ func authenticatedUser(db *sql.DB, r *http.Request) (User, error) {
 	return findUserBySession(db, cookie.Value)
 }
 
-func consumeMagicLinkToken(db *sql.DB, rawToken string) (User, error) {
-	if strings.TrimSpace(rawToken) == "" {
-		return User{}, ErrNotFound
-	}
-
-	tx, err := db.Begin()
-	if err != nil {
-		return User{}, err
-	}
-	defer tx.Rollback()
-
-	var (
-		user            User
-		expiresAt       string
-		usedAt          string
-		magicUsernameSet int
-	)
-	err = tx.QueryRow(
-		`SELECT u.id, u.username, u.public_slug, u.display_name, u.username_set, lt.expires_at, lt.used_at
-		FROM login_tokens lt
-		JOIN users u ON u.id = lt.user_id
-		WHERE lt.id=?`,
-		hashToken(rawToken),
-	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &magicUsernameSet, &expiresAt, &usedAt)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return User{}, ErrNotFound
-		}
-		return User{}, err
-	}
-	user.UsernameSet = magicUsernameSet == 1
-
-	if strings.TrimSpace(usedAt) != "" {
-		return User{}, ErrNotFound
-	}
-
-	expiresTime, err := time.Parse(time.RFC3339, expiresAt)
-	if err != nil {
-		return User{}, err
-	}
-	if !expiresTime.After(time.Now().UTC()) {
-		if _, err := tx.Exec(`DELETE FROM login_tokens WHERE id=?`, hashToken(rawToken)); err != nil {
-			return User{}, err
-		}
-		if err := tx.Commit(); err != nil {
-			return User{}, err
-		}
-		return User{}, ErrNotFound
-	}
-
-	result, err := tx.Exec(`UPDATE login_tokens SET used_at=? WHERE id=? AND used_at=''`, time.Now().UTC().Format(time.RFC3339), hashToken(rawToken))
-	if err != nil {
-		return User{}, err
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return User{}, err
-	}
-	if rowsAffected != 1 {
-		return User{}, ErrNotFound
-	}
-
-	if err := tx.Commit(); err != nil {
-		return User{}, err
-	}
-
-	user.PublicSlug, err = ensurePublicSlug(db, user.ID, user.PublicSlug)
-	if err != nil {
-		return User{}, err
-	}
-
-	return user, nil
-}
-
 func userFromContext(ctx context.Context) (User, error) {
 	user, ok := ctx.Value(userContextKey).(User)
 	if !ok {
@@ -868,9 +338,9 @@ func clearSessionCookie(w http.ResponseWriter, secure bool) {
 	})
 }
 
-func setOAuthStateCookie(w http.ResponseWriter, state string, secure bool) {
+func setOIDCStateCookie(w http.ResponseWriter, state string, secure bool) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     oauthStateCookie,
+		Name:     oidcStateCookie,
 		Value:    state,
 		Path:     "/",
 		HttpOnly: true,
@@ -881,9 +351,9 @@ func setOAuthStateCookie(w http.ResponseWriter, state string, secure bool) {
 	})
 }
 
-func clearOAuthStateCookie(w http.ResponseWriter, secure bool) {
+func clearOIDCStateCookie(w http.ResponseWriter, secure bool) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     oauthStateCookie,
+		Name:     oidcStateCookie,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
@@ -894,79 +364,36 @@ func clearOAuthStateCookie(w http.ResponseWriter, secure bool) {
 	})
 }
 
-func githubAuthorizeURL(config githubOAuthConfig, state string) string {
-	values := url.Values{}
-	values.Set("client_id", config.ClientID)
-	values.Set("redirect_uri", config.CallbackURL)
-	values.Set("scope", "read:user")
-	values.Set("state", state)
-	values.Set("allow_signup", "true")
-	return config.AuthorizeURL + "?" + values.Encode()
-}
+func cookieSecureFromEnv() (bool, error) {
+	configuredValue := strings.TrimSpace(os.Getenv("COOKIE_SECURE"))
+	httpsDeployment := urlUsesHTTPS(os.Getenv("BASE_URL"))
 
-func exchangeGitHubCode(client *http.Client, config githubOAuthConfig, code string) (string, error) {
-	values := url.Values{}
-	values.Set("client_id", config.ClientID)
-	values.Set("client_secret", config.ClientSecret)
-	values.Set("code", code)
-	values.Set("redirect_uri", config.CallbackURL)
-
-	req, err := http.NewRequest(http.MethodPost, config.TokenURL, strings.NewReader(values.Encode()))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	var tokenResp githubTokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return "", err
-	}
-
-	if resp.StatusCode != http.StatusOK || tokenResp.AccessToken == "" {
-		if tokenResp.Error != "" {
-			return "", fmt.Errorf("github token exchange failed: %s", tokenResp.Error)
+	switch configuredValue {
+	case "":
+		return httpsDeployment, nil
+	case "true":
+		return true, nil
+	case "false":
+		if httpsDeployment {
+			return false, fmt.Errorf("COOKIE_SECURE=false is not allowed when BASE_URL uses https")
 		}
-		return "", fmt.Errorf("github token exchange failed")
+		return false, nil
+	default:
+		return false, fmt.Errorf("COOKIE_SECURE must be true, false, or unset")
 	}
-
-	return tokenResp.AccessToken, nil
 }
 
-func fetchGitHubUser(client *http.Client, config githubOAuthConfig, token string) (githubOAuthUser, error) {
-	req, err := http.NewRequest(http.MethodGet, config.UserURL, nil)
+func urlUsesHTTPS(rawURL string) bool {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return false
+	}
+
+	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return githubOAuthUser{}, err
+		return false
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return githubOAuthUser{}, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return githubOAuthUser{}, fmt.Errorf("github user request failed: %s", strings.TrimSpace(string(body)))
-	}
-
-	var user githubOAuthUser
-	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
-		return githubOAuthUser{}, err
-	}
-	if user.ID == 0 || user.Login == "" {
-		return githubOAuthUser{}, fmt.Errorf("github user response was incomplete")
-	}
-	return user, nil
+	return strings.EqualFold(parsed.Scheme, "https")
 }
 
 func randomToken(size int) (string, error) {
@@ -980,115 +407,4 @@ func randomToken(size int) (string, error) {
 func hashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
-}
-
-func markEmailVerified(db *sql.DB, userID int64) error {
-	_, err := db.Exec(`UPDATE users SET email_verified=1 WHERE id=?`, userID)
-	return err
-}
-
-func createEmailVerificationToken(db *sql.DB, userID int64) (string, time.Time, error) {
-	rawToken, err := randomToken(32)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-
-	expiresAt := time.Now().UTC().Add(emailVerificationTTL)
-	tx, err := db.Begin()
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec(`DELETE FROM email_verification_tokens WHERE user_id=?`, userID); err != nil {
-		return "", time.Time{}, err
-	}
-
-	if _, err := tx.Exec(
-		`INSERT INTO email_verification_tokens (id, user_id, expires_at, used_at, created_at) VALUES (?, ?, ?, '', ?)`,
-		hashToken(rawToken), userID, expiresAt.Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339),
-	); err != nil {
-		return "", time.Time{}, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return "", time.Time{}, err
-	}
-
-	return rawToken, expiresAt, nil
-}
-
-func consumeEmailVerificationToken(db *sql.DB, rawToken string) (User, error) {
-	if strings.TrimSpace(rawToken) == "" {
-		return User{}, ErrNotFound
-	}
-
-	tx, err := db.Begin()
-	if err != nil {
-		return User{}, err
-	}
-	defer tx.Rollback()
-
-	var (
-		user               User
-		expiresAt          string
-		usedAt             string
-		verifyUsernameSet  int
-	)
-	err = tx.QueryRow(
-		`SELECT u.id, u.username, u.public_slug, u.display_name, u.username_set, et.expires_at, et.used_at
-		FROM email_verification_tokens et
-		JOIN users u ON u.id = et.user_id
-		WHERE et.id=?`,
-		hashToken(rawToken),
-	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &verifyUsernameSet, &expiresAt, &usedAt)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return User{}, ErrNotFound
-		}
-		return User{}, err
-	}
-	user.UsernameSet = verifyUsernameSet == 1
-
-	if strings.TrimSpace(usedAt) != "" {
-		return User{}, ErrNotFound
-	}
-
-	expiresTime, err := time.Parse(time.RFC3339, expiresAt)
-	if err != nil {
-		return User{}, err
-	}
-	if !expiresTime.After(time.Now().UTC()) {
-		if _, err := tx.Exec(`DELETE FROM email_verification_tokens WHERE id=?`, hashToken(rawToken)); err != nil {
-			return User{}, err
-		}
-		if err := tx.Commit(); err != nil {
-			return User{}, err
-		}
-		return User{}, ErrNotFound
-	}
-
-	result, err := tx.Exec(`UPDATE email_verification_tokens SET used_at=? WHERE id=? AND used_at=''`, time.Now().UTC().Format(time.RFC3339), hashToken(rawToken))
-	if err != nil {
-		return User{}, err
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return User{}, err
-	}
-	if rowsAffected != 1 {
-		return User{}, ErrNotFound
-	}
-
-	if err := tx.Commit(); err != nil {
-		return User{}, err
-	}
-
-	user.PublicSlug, err = ensurePublicSlug(db, user.ID, user.PublicSlug)
-	if err != nil {
-		return User{}, err
-	}
-
-	return user, nil
 }

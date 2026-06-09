@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"net/http"
@@ -15,12 +16,8 @@ func main() {
 		dbPath = "daysuntil.db"
 	}
 
-	githubOAuth := githubConfigFromEnv()
-	magicLinks, err := magicLinkConfigFromEnv()
-	if err != nil {
-		log.Fatalf("magic link config: %v", err)
-	}
-	cookieSecure, err := cookieSecureFromEnv(githubOAuth)
+	oidcCfg := oidcConfigFromEnv()
+	cookieSecure, err := cookieSecureFromEnv()
 	if err != nil {
 		log.Fatalf("cookie security config: %v", err)
 	}
@@ -38,10 +35,20 @@ func main() {
 	h := &handler{
 		db:           db,
 		cookieSecure: cookieSecure,
-		githubOAuth:  githubOAuth,
-		magicLinks:   magicLinks,
+		oidc:         oidcCfg,
 		httpClient:   http.DefaultClient,
 		authLimiter:  newAuthRateLimiter(db),
+	}
+
+	if oidcCfg.Enabled() {
+		rt, err := newOIDCRuntime(context.Background(), oidcCfg)
+		if err != nil {
+			log.Fatalf("oidc init: %v", err)
+		}
+		h.oidcRT = rt
+		log.Printf("oidc: configured with issuer %s", oidcCfg.Issuer)
+	} else {
+		log.Printf("oidc: not configured (set OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET)")
 	}
 
 	r := newRouter(h)

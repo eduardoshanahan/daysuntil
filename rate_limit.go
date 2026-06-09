@@ -13,13 +13,7 @@ import (
 
 const (
 	authRateLimitWindow           = time.Minute
-	loginRateLimitRequests        = 10
-	registerRateLimitRequests     = 5
-	magicLinkRateLimitRequests    = 5
 	publicLookupRateLimitRequests = 60
-	authActionLogin               = "login"
-	authActionRegister            = "register"
-	authActionMagicLink           = "magic_link"
 	authActionPublicLookup        = "public_lookup"
 )
 
@@ -46,18 +40,6 @@ func newAuthRateLimiter(db *sql.DB) *authRateLimiter {
 		db:  db,
 		now: time.Now,
 		policies: map[string]authRatePolicy{
-			authActionLogin: {
-				limit:  loginRateLimitRequests,
-				window: authRateLimitWindow,
-			},
-			authActionRegister: {
-				limit:  registerRateLimitRequests,
-				window: authRateLimitWindow,
-			},
-			authActionMagicLink: {
-				limit:  magicLinkRateLimitRequests,
-				window: authRateLimitWindow,
-			},
 			authActionPublicLookup: {
 				limit:  publicLookupRateLimitRequests,
 				window: authRateLimitWindow,

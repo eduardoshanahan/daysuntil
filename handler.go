@@ -35,8 +35,8 @@ type versionResponse struct {
 type handler struct {
 	db           *sql.DB
 	cookieSecure bool
-	githubOAuth  githubOAuthConfig
-	magicLinks   magicLinkConfig
+	oidc         oidcConfig
+	oidcRT       *oidcRuntime
 	httpClient   *http.Client
 	authLimiter  *authRateLimiter
 }

@@ -17,22 +17,17 @@ func newRouter(h *handler) http.Handler {
 		r.Use(noStoreMiddleware)
 
 		r.Get("/version", h.appVersion)
-		r.With(authRateLimitMiddleware(h.authLimiter, authActionRegister)).Post("/register", h.register)
-		r.With(authRateLimitMiddleware(h.authLimiter, authActionLogin)).Post("/login", h.login)
-		r.With(authRateLimitMiddleware(h.authLimiter, authActionMagicLink)).Post("/login/link", h.requestMagicLink)
-		r.Post("/login/link/consume", h.consumeMagicLink)
-		r.Post("/verify-email", h.verifyEmail)
-		r.With(authRateLimitMiddleware(h.authLimiter, authActionMagicLink)).Post("/resend-verification", h.resendVerification)
 		r.Post("/logout", h.logout)
 		r.Get("/me", h.currentUser)
 		r.Delete("/me", h.deleteAccount)
 		r.Put("/me/profile", h.updateProfile)
 		r.Put("/me/username", h.setUsername)
-		r.Get("/auth/providers", h.authProviders)
 		r.With(authRateLimitMiddleware(h.authLimiter, authActionPublicLookup)).Get("/public/groups/{groupSlug}", h.publicShareGroup)
 	})
-	r.Get("/api/oauth/github/start", h.githubOAuthStart)
-	r.Get("/api/oauth/github/callback", h.githubOAuthCallback)
+
+	r.Get("/api/oidc/start", h.oidcStart)
+	r.Get("/api/oidc/callback", h.oidcCallback)
+
 	r.Get("/g/{groupSlug}", servePublicGroupApp)
 	r.Get("/help", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "static/help.html")

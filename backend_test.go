@@ -87,25 +87,34 @@ func decodeShareGroup(t *testing.T, rec *httptest.ResponseRecorder) ShareGroup {
 	return group
 }
 
-func registerUser(t *testing.T, h http.Handler, email, username, password string) (*http.Cookie, User) {
+// createTestUser inserts a Zitadel-authenticated user directly into the DB and
+// returns a valid session cookie and the User record. This replaces the
+// register+login flow that no longer exists after switching to Zitadel OIDC.
+func createTestUser(t *testing.T, db *sql.DB, sub, username string) (*http.Cookie, User) {
 	t.Helper()
 
-	rec := performRequest(t, h, http.MethodPost, "/api/register", `{"email":"`+email+`","password":"`+password+`"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("register user: expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	user, err := findOrCreateZitadelUser(db, sub, username+"@test.example", username)
+	if err != nil {
+		t.Fatalf("create test user: %v", err)
 	}
 
-	cookies := rec.Result().Cookies()
-	if len(cookies) == 0 {
-		t.Fatal("expected session cookie after registration")
+	// Set a real username so tests can use share groups etc.
+	updated, err := setUserUsername(db, user.ID, username)
+	if err != nil {
+		t.Fatalf("set test username: %v", err)
 	}
 
-	setRec := performRequest(t, h, http.MethodPut, "/api/me/username", `{"username":"`+username+`"}`, cookies[0])
-	if setRec.Code != http.StatusOK {
-		t.Fatalf("set username: expected 200, got %d (%s)", setRec.Code, setRec.Body.String())
+	rawToken, expiresAt, err := createSession(db, updated.ID)
+	if err != nil {
+		t.Fatalf("create test session: %v", err)
 	}
 
-	return cookies[0], decodeUser(t, setRec)
+	cookie := &http.Cookie{
+		Name:    sessionCookieName,
+		Value:   rawToken,
+		Expires: expiresAt,
+	}
+	return cookie, updated
 }
 
 func createShareGroupForTest(t *testing.T, router http.Handler, cookie *http.Cookie, name string) ShareGroup {
@@ -162,14 +171,14 @@ func TestInitDBAddsColumnsToLegacySchema(t *testing.T) {
 	}
 }
 
-func TestInitDBAddsEmailColumnToLegacyUsersSchema(t *testing.T) {
+func TestInitDBAddsZitadelSubColumnToLegacyUsersSchema(t *testing.T) {
 	db := openTestDB(t)
 
 	_, err := db.Exec(`CREATE TABLE users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		username TEXT NOT NULL UNIQUE,
 		display_name TEXT NOT NULL DEFAULT '',
-		password_hash TEXT NOT NULL,
+		password_hash TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL
 	)`)
 	if err != nil {
@@ -180,31 +189,12 @@ func TestInitDBAddsEmailColumnToLegacyUsersSchema(t *testing.T) {
 		t.Fatalf("init db: %v", err)
 	}
 
-	for _, column := range []string{"email", "auth_provider", "auth_provider_user_id"} {
-		exists, err := tableColumnExists(db, "users", column)
-		if err != nil {
-			t.Fatalf("check %s column: %v", column, err)
-		}
-		if !exists {
-			t.Fatalf("expected %s column after migration", column)
-		}
-	}
-}
-
-func TestInitDBCreatesLoginTokensTable(t *testing.T) {
-	db := openTestDB(t)
-
-	if err := initDB(db); err != nil {
-		t.Fatalf("init db: %v", err)
-	}
-
-	var name string
-	err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='login_tokens'`).Scan(&name)
+	exists, err := tableColumnExists(db, "users", "zitadel_sub")
 	if err != nil {
-		t.Fatalf("expected login_tokens table: %v", err)
+		t.Fatalf("check zitadel_sub column: %v", err)
 	}
-	if name != "login_tokens" {
-		t.Fatalf("expected login_tokens table, got %q", name)
+	if !exists {
+		t.Fatalf("expected zitadel_sub column after migration")
 	}
 }
 
@@ -240,7 +230,7 @@ func TestValidateIntervalAllowsSameDayRange(t *testing.T) {
 	}
 }
 
-func TestRegisterAdoptsLegacyIntervalsForFirstUser(t *testing.T) {
+func TestFirstZitadelUserAdoptsLegacyIntervals(t *testing.T) {
 	db, router := newTestServer(t)
 
 	_, err := db.Exec(
@@ -251,12 +241,9 @@ func TestRegisterAdoptsLegacyIntervalsForFirstUser(t *testing.T) {
 		t.Fatalf("insert legacy interval: %v", err)
 	}
 
-	cookie, user := registerUser(t, router, "alice@example.com", "alice", "password123")
+	cookie, user := createTestUser(t, db, "sub-alice-001", "alice")
 	if user.Username != "alice" {
 		t.Fatalf("expected username alice, got %q", user.Username)
-	}
-	if user.DisplayName != "alice" {
-		t.Fatalf("expected default display name alice, got %q", user.DisplayName)
 	}
 
 	rec := performRequest(t, router, http.MethodGet, "/api/intervals", "", cookie)
@@ -338,16 +325,10 @@ func TestAPIResponsesDisableCaching(t *testing.T) {
 	}
 }
 
-func TestLoginAndCurrentUser(t *testing.T) {
-	_, router := newTestServer(t)
+func TestCurrentUser(t *testing.T) {
+	db, router := newTestServer(t)
 
-	registerUser(t, router, "alice@example.com", "alice", "password123")
-
-	rec := performRequest(t, router, http.MethodPost, "/api/login", `{"email":"alice@example.com","password":"password123"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("login: expected 200, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	cookie := rec.Result().Cookies()[0]
+	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
 
 	me := performRequest(t, router, http.MethodGet, "/api/me", "", cookie)
 	if me.Code != http.StatusOK {
@@ -360,10 +341,10 @@ func TestLoginAndCurrentUser(t *testing.T) {
 }
 
 func TestUsersOnlySeeTheirOwnIntervals(t *testing.T) {
-	_, router := newTestServer(t)
+	db, router := newTestServer(t)
 
-	aliceCookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
-	bobCookie, _ := registerUser(t, router, "bob@example.com", "bob", "password123")
+	aliceCookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
+	bobCookie, _ := createTestUser(t, db, "sub-bob-001", "bob")
 	bobGroup := createShareGroupForTest(t, router, bobCookie, "Bob Trips")
 
 	createAlice := performRequest(t, router, http.MethodPost, "/api/intervals", `{
@@ -424,9 +405,9 @@ func TestUsersOnlySeeTheirOwnIntervals(t *testing.T) {
 }
 
 func TestCreateIntervalRejectsUnknownFields(t *testing.T) {
-	_, router := newTestServer(t)
+	db, router := newTestServer(t)
 
-	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
 
 	rec := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 		"name":"Trip",
@@ -441,9 +422,9 @@ func TestCreateIntervalRejectsUnknownFields(t *testing.T) {
 }
 
 func TestUpdateDisplayName(t *testing.T) {
-	_, router := newTestServer(t)
+	db, router := newTestServer(t)
 
-	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
 	rec := performRequest(t, router, http.MethodPut, "/api/me/profile", `{"display_name":"Eduardo Shanahan"}`, cookie)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 updating profile, got %d (%s)", rec.Code, rec.Body.String())
@@ -456,9 +437,9 @@ func TestUpdateDisplayName(t *testing.T) {
 }
 
 func TestShareGroupsListCreateUpdateRotateAndDelete(t *testing.T) {
-	_, router := newTestServer(t)
+	db, router := newTestServer(t)
 
-	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
 	group := createShareGroupForTest(t, router, cookie, "Trips")
 	if group.PublicSlug == "" {
 		t.Fatal("expected public slug for share group")
@@ -503,9 +484,9 @@ func TestShareGroupsListCreateUpdateRotateAndDelete(t *testing.T) {
 }
 
 func TestIntervalsCanBeAssignedToShareGroup(t *testing.T) {
-	_, router := newTestServer(t)
+	db, router := newTestServer(t)
 
-	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
 	group := createShareGroupForTest(t, router, cookie, "Trips")
 
 	create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
@@ -532,9 +513,9 @@ func TestIntervalsCanBeAssignedToShareGroup(t *testing.T) {
 }
 
 func TestPublicShareGroupShowsOnlyAssignedIntervals(t *testing.T) {
-	_, router := newTestServer(t)
+	db, router := newTestServer(t)
 
-	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
 
 	updateProfile := performRequest(t, router, http.MethodPut, "/api/me/profile", `{"display_name":"Alice Public"}`, cookie)
 	if updateProfile.Code != http.StatusOK {
@@ -587,9 +568,9 @@ func TestPublicShareGroupShowsOnlyAssignedIntervals(t *testing.T) {
 }
 
 func TestPublicShareGroupReturnsNotFoundWhenGroupIsEmpty(t *testing.T) {
-	_, router := newTestServer(t)
+	db, router := newTestServer(t)
 
-	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
 	group := createShareGroupForTest(t, router, cookie, "Trips")
 
 	rec := performRequest(t, router, http.MethodGet, "/api/public/groups/"+group.PublicSlug, "")
@@ -599,9 +580,9 @@ func TestPublicShareGroupReturnsNotFoundWhenGroupIsEmpty(t *testing.T) {
 }
 
 func TestDeletingShareGroupMakesItsIntervalsPrivate(t *testing.T) {
-	_, router := newTestServer(t)
+	db, router := newTestServer(t)
 
-	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
 	group := createShareGroupForTest(t, router, cookie, "Trips")
 
 	create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
@@ -638,9 +619,9 @@ func TestDeletingShareGroupMakesItsIntervalsPrivate(t *testing.T) {
 }
 
 func TestMoveIntervalReordersList(t *testing.T) {
-	_, router := newTestServer(t)
+	db, router := newTestServer(t)
 
-	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
 
 	for _, name := range []string{"One", "Two", "Three"} {
 		create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
@@ -677,7 +658,7 @@ func TestMoveIntervalReordersList(t *testing.T) {
 func TestMoveIntervalNormalizesLegacyZeroPositions(t *testing.T) {
 	db, router := newTestServer(t)
 
-	cookie, user := registerUser(t, router, "legacy@example.com", "legacy", "password123")
+	cookie, user := createTestUser(t, db, "sub-legacy-001", "legacy")
 
 	for _, name := range []string{"First", "Second"} {
 		create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
@@ -718,238 +699,15 @@ func TestMoveIntervalNormalizesLegacyZeroPositions(t *testing.T) {
 	}
 }
 
-func TestLoginRateLimitReturnsTooManyRequests(t *testing.T) {
-	limiter := newAuthRateLimiter(nil)
-	limiter.now = func() time.Time {
-		return time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
-	}
-	limiter.policies[authActionLogin] = authRatePolicy{limit: 2, window: time.Minute}
-
-	_, router := newTestServerWithHandler(t, &handler{authLimiter: limiter})
-	registerUser(t, router, "alice@example.com", "alice", "password123")
-
-	for attempt := 1; attempt <= 2; attempt++ {
-		rec := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/login", `{"email":"alice@example.com","password":"wrongpass"}`, "198.51.100.10:4567")
-		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("attempt %d: expected 401, got %d (%s)", attempt, rec.Code, rec.Body.String())
-		}
-	}
-
-	blocked := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/login", `{"email":"alice@example.com","password":"wrongpass"}`, "198.51.100.10:4567")
-	if blocked.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected 429 after limit, got %d (%s)", blocked.Code, blocked.Body.String())
-	}
-	if blocked.Header().Get("Retry-After") == "" {
-		t.Fatal("expected Retry-After header on rate-limited login")
-	}
-}
-
-func TestRegisterRateLimitReturnsTooManyRequests(t *testing.T) {
-	limiter := newAuthRateLimiter(nil)
-	limiter.now = func() time.Time {
-		return time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
-	}
-	limiter.policies[authActionRegister] = authRatePolicy{limit: 2, window: time.Minute}
-
-	_, router := newTestServerWithHandler(t, &handler{authLimiter: limiter})
-
-	for attempt := 1; attempt <= 2; attempt++ {
-		rec := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/register", `{"email":"user`+string(rune('0'+attempt))+`@example.com","password":"password123"}`, "203.0.113.22:8080")
-		if rec.Code != http.StatusOK {
-			t.Fatalf("attempt %d: expected 200, got %d (%s)", attempt, rec.Code, rec.Body.String())
-		}
-	}
-
-	blocked := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/register", `{"email":"user3@example.com","password":"password123"}`, "203.0.113.22:8080")
-	if blocked.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected 429 after limit, got %d (%s)", blocked.Code, blocked.Body.String())
-	}
-	if blocked.Header().Get("Retry-After") == "" {
-		t.Fatal("expected Retry-After header on rate-limited registration")
-	}
-}
-
-func TestLoginAndRegisterRateLimitsAreIndependent(t *testing.T) {
-	limiter := newAuthRateLimiter(nil)
-	limiter.now = func() time.Time {
-		return time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
-	}
-	limiter.policies[authActionLogin] = authRatePolicy{limit: 1, window: time.Minute}
-	limiter.policies[authActionRegister] = authRatePolicy{limit: 2, window: time.Minute}
-
-	_, router := newTestServerWithHandler(t, &handler{authLimiter: limiter})
-	registerUser(t, router, "alice@example.com", "alice", "password123")
-
-	firstLogin := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/login", `{"email":"alice@example.com","password":"wrongpass"}`, "198.51.100.30:9999")
-	if firstLogin.Code != http.StatusUnauthorized {
-		t.Fatalf("expected first login attempt to pass through, got %d", firstLogin.Code)
-	}
-
-	secondLogin := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/login", `{"email":"alice@example.com","password":"wrongpass"}`, "198.51.100.30:9999")
-	if secondLogin.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected second login attempt to be rate-limited, got %d", secondLogin.Code)
-	}
-
-	registerAttempt := performRequestFromRemoteAddr(t, router, http.MethodPost, "/api/register", `{"email":"bob@example.com","password":"password123"}`, "198.51.100.30:9999")
-	if registerAttempt.Code != http.StatusOK {
-		t.Fatalf("expected register limit to remain independent, got %d (%s)", registerAttempt.Code, registerAttempt.Body.String())
-	}
-}
-
-func TestLoginRejectsUsernameAsIdentifier(t *testing.T) {
-	_, router := newTestServer(t)
-
-	registerUser(t, router, "alice@example.com", "alice", "password123")
-
-	rec := performRequest(t, router, http.MethodPost, "/api/login", `{"email":"alice","password":"password123"}`)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if strings.TrimSpace(rec.Body.String()) != "invalid email or password" {
-		t.Fatalf("expected generic auth failure, got %q", strings.TrimSpace(rec.Body.String()))
-	}
-}
-
-func TestRegisterRejectsEmailWithoutDotInDomain(t *testing.T) {
-	_, router := newTestServer(t)
-
-	rec := performRequest(t, router, http.MethodPost, "/api/register", `{"email":"contact@nodomain","password":"password123"}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for email without dot in domain, got %d (%s)", rec.Code, rec.Body.String())
-	}
-}
-
-func TestOAuthAccountCannotUseLocalPasswordLogin(t *testing.T) {
+func TestCurrentUserResponseDoesNotExposeEmail(t *testing.T) {
 	db, router := newTestServer(t)
 
-	_, err := db.Exec(
-		`INSERT INTO users (email, username, display_name, password_hash, auth_provider, auth_provider_user_id, created_at) VALUES (?, ?, ?, '', ?, ?, ?)`,
-		"oauth@example.com", "gh_alice", "Alice OAuth", "gh", "12345", time.Now().UTC().Format(time.RFC3339),
-	)
-	if err != nil {
-		t.Fatalf("insert oauth user: %v", err)
-	}
-
-	rec := performRequest(t, router, http.MethodPost, "/api/login", `{"email":"oauth@example.com","password":"password123"}`)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if strings.TrimSpace(rec.Body.String()) != "invalid email or password" {
-		t.Fatalf("expected generic auth failure, got %q", strings.TrimSpace(rec.Body.String()))
-	}
-}
-
-func TestMagicLinkRequestReturnsGenericSuccessForUnknownEmail(t *testing.T) {
-	sent := false
-	_, router := newTestServerWithHandler(t, &handler{
-		authLimiter: newAuthRateLimiter(nil),
-		magicLinks: magicLinkConfig{
-			BaseURL:  "http://localhost:8080",
-			From:     "noreply@example.com",
-			SMTPHost: "smtp.example.com",
-			SMTPPort: "587",
-			send: func(email, rawToken string) error {
-				sent = true
-				return nil
-			},
-		},
-	})
-
-	rec := performRequest(t, router, http.MethodPost, "/api/login/link", `{"email":"nobody@example.com"}`)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if sent {
-		t.Fatal("expected no email to be sent for unknown account")
-	}
-}
-
-func TestMagicLinkRequestStoresHashedTokenAndConsumeCreatesSession(t *testing.T) {
-	var (
-		sentEmail string
-		rawToken  string
-	)
-	db, router := newTestServerWithHandler(t, &handler{
-		authLimiter: newAuthRateLimiter(nil),
-		magicLinks: magicLinkConfig{
-			BaseURL:  "http://localhost:8080",
-			From:     "noreply@example.com",
-			SMTPHost: "smtp.example.com",
-			SMTPPort: "587",
-			send: func(email, token string) error {
-				sentEmail = email
-				rawToken = token
-				return nil
-			},
-		},
-	})
-
-	// Register with SMTP configured — returns 202 (verification email sent via stub).
-	// Directly mark the user verified to avoid coupling this test to the email verification flow.
-	regRec := performRequest(t, router, http.MethodPost, "/api/register", `{"email":"alice@example.com","password":"password123"}`)
-	if regRec.Code != http.StatusAccepted {
-		t.Fatalf("register: expected 202, got %d (%s)", regRec.Code, regRec.Body.String())
-	}
-	if _, err := db.Exec(`UPDATE users SET email_verified=1 WHERE email='alice@example.com'`); err != nil {
-		t.Fatalf("mark verified: %v", err)
-	}
-
-	requestRec := performRequest(t, router, http.MethodPost, "/api/login/link", `{"email":"alice@example.com"}`)
-	if requestRec.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d (%s)", requestRec.Code, requestRec.Body.String())
-	}
-	if sentEmail != "alice@example.com" {
-		t.Fatalf("expected magic link email to be sent to alice@example.com, got %q", sentEmail)
-	}
-	if rawToken == "" {
-		t.Fatal("expected raw magic link token to be captured")
-	}
-
-	var storedID string
-	var usedAt string
-	if err := db.QueryRow(`SELECT id, used_at FROM login_tokens`).Scan(&storedID, &usedAt); err != nil {
-		t.Fatalf("query login token: %v", err)
-	}
-	if storedID == rawToken {
-		t.Fatal("expected stored login token to be hashed, not raw")
-	}
-	if strings.TrimSpace(usedAt) != "" {
-		t.Fatalf("expected unused token, got used_at=%q", usedAt)
-	}
-
-	consumeRec := performRequest(t, router, http.MethodPost, "/api/login/link/consume", `{"token":"`+rawToken+`"}`)
-	if consumeRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 consuming magic link, got %d (%s)", consumeRec.Code, consumeRec.Body.String())
-	}
-
-	cookies := consumeRec.Result().Cookies()
-	if len(cookies) == 0 {
-		t.Fatal("expected session cookie after consuming magic link")
-	}
-
-	me := performRequest(t, router, http.MethodGet, "/api/me", "", cookies[0])
-	if me.Code != http.StatusOK {
-		t.Fatalf("expected 200 for authenticated /api/me, got %d (%s)", me.Code, me.Body.String())
-	}
-
-	reuseRec := performRequest(t, router, http.MethodPost, "/api/login/link/consume", `{"token":"`+rawToken+`"}`)
-	if reuseRec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 reusing magic link, got %d (%s)", reuseRec.Code, reuseRec.Body.String())
-	}
-	if strings.TrimSpace(reuseRec.Body.String()) != "invalid or expired sign-in link" {
-		t.Fatalf("expected generic consume failure, got %q", strings.TrimSpace(reuseRec.Body.String()))
-	}
-}
-
-func TestCurrentUserResponseDoesNotExposeEmail(t *testing.T) {
-	_, router := newTestServer(t)
-
-	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
 	rec := performRequest(t, router, http.MethodGet, "/api/me", "", cookie)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
-	if strings.Contains(rec.Body.String(), "alice@example.com") {
+	if strings.Contains(rec.Body.String(), "alice@test.example") {
 		t.Fatalf("expected email to stay private, got %q", rec.Body.String())
 	}
 	if strings.Contains(rec.Body.String(), "\"email\"") {
@@ -960,7 +718,7 @@ func TestCurrentUserResponseDoesNotExposeEmail(t *testing.T) {
 func TestDeleteAccountRemovesUserIntervalsGroupsAndSession(t *testing.T) {
 	db, router := newTestServer(t)
 
-	cookie, _ := registerUser(t, router, "alice@example.com", "alice", "password123")
+	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
 	group := createShareGroupForTest(t, router, cookie, "Trips")
 
 	create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
@@ -1019,5 +777,30 @@ func TestDeleteAccountRemovesUserIntervalsGroupsAndSession(t *testing.T) {
 	}
 	if sessionCount != 0 {
 		t.Fatalf("expected no sessions after deletion, got %d", sessionCount)
+	}
+}
+
+func TestPublicLookupRateLimitReturnsTooManyRequests(t *testing.T) {
+	limiter := newAuthRateLimiter(nil)
+	limiter.now = func() time.Time {
+		return time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	}
+	limiter.policies[authActionPublicLookup] = authRatePolicy{limit: 2, window: time.Minute}
+
+	_, router := newTestServerWithHandler(t, &handler{authLimiter: limiter})
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		rec := performRequestFromRemoteAddr(t, router, http.MethodGet, "/api/public/groups/nonexistent", "", "198.51.100.10:4567")
+		if rec.Code == http.StatusTooManyRequests {
+			t.Fatalf("attempt %d: unexpectedly rate-limited, got 429", attempt)
+		}
+	}
+
+	blocked := performRequestFromRemoteAddr(t, router, http.MethodGet, "/api/public/groups/nonexistent", "", "198.51.100.10:4567")
+	if blocked.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 after limit, got %d (%s)", blocked.Code, blocked.Body.String())
+	}
+	if blocked.Header().Get("Retry-After") == "" {
+		t.Fatal("expected Retry-After header on rate-limited request")
 	}
 }

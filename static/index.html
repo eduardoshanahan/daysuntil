@@ -38,43 +38,10 @@
 
   <section id="auth-view" class="auth-shell hidden" aria-live="polite">
     <div class="auth-card">
-      <p id="auth-kicker" class="auth-kicker">Login</p>
-      <h2 id="auth-title">Sign in to your account</h2>
-      <p id="auth-subtitle" class="auth-subtitle">Your intervals stay private until you place them in a share group.</p>
-
-      <form id="auth-form" class="auth-form" novalidate>
-        <div id="auth-email-row">
-          <label for="auth-email">Email</label>
-          <input type="email" id="auth-email" autocomplete="email" required />
-        </div>
-
-        <div id="auth-password-row">
-          <label for="auth-password">Password</label>
-          <input type="password" id="auth-password" autocomplete="current-password" required />
-        </div>
-
-        <p id="auth-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
-        <button id="auth-resend-verification" type="button" class="btn-link hidden">Resend verification email</button>
-
-        <div class="auth-actions">
-          <button id="auth-submit" type="submit" class="btn-primary">Log in</button>
-        </div>
-        <button id="auth-magic-link" type="button" class="btn-link hidden">Email me a sign-in link instead</button>
-      </form>
-
-      <div id="auth-oauth" class="auth-oauth hidden">
-        <div class="auth-divider" aria-hidden="true">
-          <span></span>
-          <p>or</p>
-          <span></span>
-        </div>
-        <a id="auth-github" class="btn-secondary auth-oauth-btn" href="/api/oauth/github/start">Continue with GitHub</a>
-      </div>
-
-      <p class="auth-switch-copy">
-        <span id="auth-switch-label">Need an account?</span>
-        <button id="auth-switch" type="button" class="btn-link">Create one</button>
-      </p>
+      <h2>Days Until</h2>
+      <p class="auth-subtitle">Track countdowns to your future events.</p>
+      <p id="auth-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
+      <a href="/api/oidc/start" class="btn-primary auth-signin-btn">Sign in</a>
     </div>
   </section>
 
