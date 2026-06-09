@@ -69,9 +69,10 @@ func (h *handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var claims struct {
-		Sub   string `json:"sub"`
-		Email string `json:"email"`
-		Name  string `json:"name"`
+		Sub               string `json:"sub"`
+		Email             string `json:"email"`
+		Name              string `json:"name"`
+		PreferredUsername string `json:"preferred_username"`
 	}
 	if err := idToken.Claims(&claims); err != nil {
 		log.Printf("oidc: claims extraction failed: %v", err)
@@ -79,7 +80,17 @@ func (h *handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := findOrCreateZitadelUser(h.db, claims.Sub, claims.Email, claims.Name)
+	displayName := claims.Name
+	if displayName == "" {
+		displayName = claims.PreferredUsername
+	}
+	if displayName == "" {
+		if idx := strings.Index(claims.Email, "@"); idx > 0 {
+			displayName = claims.Email[:idx]
+		}
+	}
+
+	user, err := findOrCreateZitadelUser(h.db, claims.Sub, claims.Email, displayName)
 	if err != nil {
 		log.Printf("oidc: find/create user failed: %v", err)
 		http.Redirect(w, r, "/?auth_error="+url.QueryEscape("Sign-in failed. Please try again."), http.StatusFound)
