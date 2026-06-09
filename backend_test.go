@@ -171,6 +171,40 @@ func TestInitDBAddsColumnsToLegacySchema(t *testing.T) {
 	}
 }
 
+func TestInitDBDropsPasswordHashFromLegacySchema(t *testing.T) {
+	db := openTestDB(t)
+
+	// Simulate the pre-OIDC schema: password_hash TEXT NOT NULL with no default.
+	_, err := db.Exec(`CREATE TABLE users (
+		id            INTEGER PRIMARY KEY AUTOINCREMENT,
+		username      TEXT NOT NULL UNIQUE,
+		display_name  TEXT NOT NULL DEFAULT '',
+		password_hash TEXT NOT NULL,
+		created_at    TEXT NOT NULL
+	)`)
+	if err != nil {
+		t.Fatalf("create legacy users table: %v", err)
+	}
+
+	if err := initDB(db); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	// password_hash should be gone so OIDC INSERTs don't fail.
+	exists, err := tableColumnExists(db, "users", "password_hash")
+	if err != nil {
+		t.Fatalf("check password_hash column: %v", err)
+	}
+	if exists {
+		t.Fatal("expected password_hash column to be dropped after migration")
+	}
+
+	// Confirm a Zitadel user can actually be inserted after migration.
+	if _, err := findOrCreateZitadelUser(db, "sub-test-001", "test@example.com", "Test User"); err != nil {
+		t.Fatalf("findOrCreateZitadelUser failed after migration: %v", err)
+	}
+}
+
 func TestInitDBAddsZitadelSubColumnToLegacyUsersSchema(t *testing.T) {
 	db := openTestDB(t)
 

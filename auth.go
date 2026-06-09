@@ -64,6 +64,12 @@ func initAuthDB(db *sql.DB) error {
 		return err
 	}
 
+	// password_hash from the pre-OIDC schema has no DEFAULT, causing NOT NULL
+	// failures when inserting OIDC users. Drop it; it is never read or written.
+	if err := dropUserColumnIfExists(db, "password_hash"); err != nil {
+		return err
+	}
+
 	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_zitadel_sub ON users(zitadel_sub) WHERE zitadel_sub <> ''`)
 	if err != nil {
 		return err
@@ -110,6 +116,18 @@ func ensureUserColumn(db *sql.DB, column, statement string) error {
 		return nil
 	}
 	_, err = db.Exec(statement)
+	return err
+}
+
+func dropUserColumnIfExists(db *sql.DB, column string) error {
+	exists, err := tableColumnExists(db, "users", column)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	_, err = db.Exec("ALTER TABLE users DROP COLUMN " + column)
 	return err
 }
 
