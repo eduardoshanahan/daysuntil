@@ -36,8 +36,7 @@ type User struct {
 func initAuthDB(db *sql.DB) error {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS users (
 		id           INTEGER PRIMARY KEY AUTOINCREMENT,
-		zitadel_sub  TEXT NOT NULL DEFAULT '',
-		email        TEXT NOT NULL DEFAULT '',
+		oidc_sub     TEXT NOT NULL DEFAULT '',
 		username     TEXT NOT NULL UNIQUE,
 		public_slug  TEXT NOT NULL DEFAULT '',
 		display_name TEXT NOT NULL DEFAULT '',
@@ -48,13 +47,13 @@ func initAuthDB(db *sql.DB) error {
 		return err
 	}
 
-	if err := ensureUserColumn(db, "zitadel_sub", "ALTER TABLE users ADD COLUMN zitadel_sub TEXT NOT NULL DEFAULT ''"); err != nil {
+	if err := renameUserColumnIfExists(db, "zitadel_sub", "oidc_sub"); err != nil {
+		return err
+	}
+	if err := ensureUserColumn(db, "oidc_sub", "ALTER TABLE users ADD COLUMN oidc_sub TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := ensureUserColumn(db, "display_name", "ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := ensureUserColumn(db, "email", "ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := ensureUserColumn(db, "public_slug", "ALTER TABLE users ADD COLUMN public_slug TEXT NOT NULL DEFAULT ''"); err != nil {
@@ -64,17 +63,18 @@ func initAuthDB(db *sql.DB) error {
 		return err
 	}
 
-	// password_hash from the pre-OIDC schema has no DEFAULT, causing NOT NULL
-	// failures when inserting OIDC users. Drop it; it is never read or written.
 	if err := dropUserColumnIfExists(db, "password_hash"); err != nil {
 		return err
 	}
+	if err := dropUserColumnIfExists(db, "email"); err != nil {
+		return err
+	}
 
-	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_zitadel_sub ON users(zitadel_sub) WHERE zitadel_sub <> ''`)
+	_, err = db.Exec(`DROP INDEX IF EXISTS idx_users_zitadel_sub`)
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email <> ''`)
+	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oidc_sub ON users(oidc_sub) WHERE oidc_sub <> ''`)
 	if err != nil {
 		return err
 	}
@@ -131,6 +131,18 @@ func dropUserColumnIfExists(db *sql.DB, column string) error {
 	return err
 }
 
+func renameUserColumnIfExists(db *sql.DB, oldColumn, newColumn string) error {
+	exists, err := tableColumnExists(db, "users", oldColumn)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	_, err = db.Exec("ALTER TABLE users RENAME COLUMN " + oldColumn + " TO " + newColumn)
+	return err
+}
+
 func validateUsername(username string) (string, error) {
 	username = strings.ToLower(strings.TrimSpace(username))
 	if username == "" {
@@ -162,15 +174,15 @@ func randomPlaceholderUsername() (string, error) {
 	return fmt.Sprintf("pending-%x", buf), nil
 }
 
-func findOrCreateZitadelUser(db *sql.DB, sub, email, displayName string) (User, error) {
+func findOrCreateOIDCUser(db *sql.DB, sub, displayName string) (User, error) {
 	if sub == "" {
-		return User{}, fmt.Errorf("zitadel sub is required")
+		return User{}, fmt.Errorf("oidc sub is required")
 	}
 
 	var user User
 	var usernameSet int
 	err := db.QueryRow(
-		`SELECT id, username, public_slug, display_name, username_set FROM users WHERE zitadel_sub=?`,
+		`SELECT id, username, public_slug, display_name, username_set FROM users WHERE oidc_sub=?`,
 		sub,
 	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &usernameSet)
 	if err == nil {
@@ -202,12 +214,12 @@ func findOrCreateZitadelUser(db *sql.DB, sub, email, displayName string) (User, 
 	}
 
 	res, err := tx.Exec(
-		`INSERT INTO users (zitadel_sub, email, username, display_name, created_at, username_set) VALUES (?, ?, ?, ?, ?, 0)`,
-		sub, email, placeholderUsername, displayName, time.Now().UTC().Format(time.RFC3339),
+		`INSERT INTO users (oidc_sub, username, display_name, created_at, username_set) VALUES (?, ?, ?, ?, 0)`,
+		sub, placeholderUsername, displayName, time.Now().UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return findOrCreateZitadelUser(db, sub, email, displayName)
+			return findOrCreateOIDCUser(db, sub, displayName)
 		}
 		return User{}, err
 	}

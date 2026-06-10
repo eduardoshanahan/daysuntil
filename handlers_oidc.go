@@ -70,7 +70,6 @@ func (h *handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 
 	var claims struct {
 		Sub               string `json:"sub"`
-		Email             string `json:"email"`
 		Name              string `json:"name"`
 		PreferredUsername string `json:"preferred_username"`
 	}
@@ -84,13 +83,8 @@ func (h *handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	if displayName == "" {
 		displayName = claims.PreferredUsername
 	}
-	if displayName == "" {
-		if idx := strings.Index(claims.Email, "@"); idx > 0 {
-			displayName = claims.Email[:idx]
-		}
-	}
 
-	user, err := findOrCreateZitadelUser(h.db, claims.Sub, claims.Email, displayName)
+	user, err := findOrCreateOIDCUser(h.db, claims.Sub, displayName)
 	if err != nil {
 		log.Printf("oidc: find/create user failed: %v", err)
 		http.Redirect(w, r, "/?auth_error="+url.QueryEscape("Sign-in failed. Please try again."), http.StatusFound)

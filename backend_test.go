@@ -87,13 +87,13 @@ func decodeShareGroup(t *testing.T, rec *httptest.ResponseRecorder) ShareGroup {
 	return group
 }
 
-// createTestUser inserts a Zitadel-authenticated user directly into the DB and
+// createTestUser inserts an OIDC-authenticated user directly into the DB and
 // returns a valid session cookie and the User record. This replaces the
-// register+login flow that no longer exists after switching to Zitadel OIDC.
+// register+login flow that no longer exists after switching to OIDC.
 func createTestUser(t *testing.T, db *sql.DB, sub, username string) (*http.Cookie, User) {
 	t.Helper()
 
-	user, err := findOrCreateZitadelUser(db, sub, username+"@test.example", username)
+	user, err := findOrCreateOIDCUser(db, sub, username)
 	if err != nil {
 		t.Fatalf("create test user: %v", err)
 	}
@@ -199,13 +199,13 @@ func TestInitDBDropsPasswordHashFromLegacySchema(t *testing.T) {
 		t.Fatal("expected password_hash column to be dropped after migration")
 	}
 
-	// Confirm a Zitadel user can actually be inserted after migration.
-	if _, err := findOrCreateZitadelUser(db, "sub-test-001", "test@example.com", "Test User"); err != nil {
-		t.Fatalf("findOrCreateZitadelUser failed after migration: %v", err)
+	// Confirm an OIDC user can actually be inserted after migration.
+	if _, err := findOrCreateOIDCUser(db, "sub-test-001", "Test User"); err != nil {
+		t.Fatalf("findOrCreateOIDCUser failed after migration: %v", err)
 	}
 }
 
-func TestInitDBAddsZitadelSubColumnToLegacyUsersSchema(t *testing.T) {
+func TestInitDBAddsOIDCSubColumnToLegacyUsersSchema(t *testing.T) {
 	db := openTestDB(t)
 
 	_, err := db.Exec(`CREATE TABLE users (
@@ -223,12 +223,12 @@ func TestInitDBAddsZitadelSubColumnToLegacyUsersSchema(t *testing.T) {
 		t.Fatalf("init db: %v", err)
 	}
 
-	exists, err := tableColumnExists(db, "users", "zitadel_sub")
+	exists, err := tableColumnExists(db, "users", "oidc_sub")
 	if err != nil {
-		t.Fatalf("check zitadel_sub column: %v", err)
+		t.Fatalf("check oidc_sub column: %v", err)
 	}
 	if !exists {
-		t.Fatalf("expected zitadel_sub column after migration")
+		t.Fatalf("expected oidc_sub column after migration")
 	}
 }
 
@@ -264,7 +264,7 @@ func TestValidateIntervalAllowsSameDayRange(t *testing.T) {
 	}
 }
 
-func TestFirstZitadelUserAdoptsLegacyIntervals(t *testing.T) {
+func TestFirstOIDCUserAdoptsLegacyIntervals(t *testing.T) {
 	db, router := newTestServer(t)
 
 	_, err := db.Exec(
