@@ -66,6 +66,9 @@ func initAuthDB(db *sql.DB) error {
 	if err := dropUserColumnIfExists(db, "password_hash"); err != nil {
 		return err
 	}
+	if _, err := db.Exec(`DROP INDEX IF EXISTS idx_users_email`); err != nil {
+		return err
+	}
 	if err := dropUserColumnIfExists(db, "email"); err != nil {
 		return err
 	}
