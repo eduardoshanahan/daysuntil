@@ -18,6 +18,7 @@ import (
 const (
 	sessionCookieName = "daysuntil_session"
 	oidcStateCookie   = "daysuntil_oidc_state"
+	oidcPKCECookie    = "daysuntil_oidc_pkce"
 	sessionTTL        = 30 * 24 * time.Hour
 )
 
@@ -387,6 +388,32 @@ func setOIDCStateCookie(w http.ResponseWriter, state string, secure bool) {
 func clearOIDCStateCookie(w http.ResponseWriter, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     oidcStateCookie,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+	})
+}
+
+func setOIDCPKCECookie(w http.ResponseWriter, verifier string, secure bool) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     oidcPKCECookie,
+		Value:    verifier,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+		MaxAge:   600,
+		Expires:  time.Now().Add(10 * time.Minute),
+	})
+}
+
+func clearOIDCPKCECookie(w http.ResponseWriter, secure bool) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     oidcPKCECookie,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,

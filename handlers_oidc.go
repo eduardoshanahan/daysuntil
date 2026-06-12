@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"golang.org/x/oauth2"
 )
 
 func (h *handler) oidcStart(w http.ResponseWriter, r *http.Request) {
@@ -20,8 +22,10 @@ func (h *handler) oidcStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	verifier := oauth2.GenerateVerifier()
 	setOIDCStateCookie(w, state, h.cookieSecure)
-	http.Redirect(w, r, h.oidcRT.oauth2Cfg.AuthCodeURL(state), http.StatusFound)
+	setOIDCPKCECookie(w, verifier, h.cookieSecure)
+	http.Redirect(w, r, h.oidcRT.oauth2Cfg.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier)), http.StatusFound)
 }
 
 func (h *handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
@@ -46,8 +50,15 @@ func (h *handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	clearOIDCStateCookie(w, h.cookieSecure)
 
+	pkceCookie, err := r.Cookie(oidcPKCECookie)
+	clearOIDCPKCECookie(w, h.cookieSecure)
+	if err != nil || pkceCookie.Value == "" {
+		http.Redirect(w, r, "/?auth_error="+url.QueryEscape("Sign-in could not be verified. Please try again."), http.StatusFound)
+		return
+	}
+
 	ctx := context.Background()
-	token, err := h.oidcRT.oauth2Cfg.Exchange(ctx, code)
+	token, err := h.oidcRT.oauth2Cfg.Exchange(ctx, code, oauth2.VerifierOption(pkceCookie.Value))
 	if err != nil {
 		log.Printf("oidc: code exchange failed: %v", err)
 		http.Redirect(w, r, "/?auth_error="+url.QueryEscape("Sign-in failed. Please try again."), http.StatusFound)
