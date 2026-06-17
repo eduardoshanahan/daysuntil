@@ -86,11 +86,30 @@ jobs:
       - name: Deploy to vps-01
         if: github.ref == 'refs/heads/vps'
         run: |
-          echo "${{ secrets.DAYSUNTIL_DEPLOY_KEY }}" > /tmp/deploy_key
-          chmod 600 /tmp/deploy_key
-          ssh -i /tmp/deploy_key \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            eduardo@127.0.0.1 \
-            "${{ steps.version.outputs.value }}"
-          rm -f /tmp/deploy_key
+          WORK=$(mktemp -d)
+          trap 'rm -rf "$WORK"' EXIT
+
+          git clone --depth=1 \
+            ssh://git@gitea.hhlab.home.arpa:2222/eduardo/deployments.git \
+            "$WORK"
+
+          sed -i 's|"DAYSUNTIL_IMAGE_TAG=[^"]*"|"DAYSUNTIL_IMAGE_TAG=${{ steps.version.outputs.value }}"|' \
+            "$WORK/vps-01/nixos/daysuntil.nix"
+
+          git -C "$WORK" diff --quiet || {
+            git -C "$WORK" \
+              -c user.name="gitea-runner" \
+              -c user.email="ci@meganix.hhlab.home.arpa" \
+              add vps-01/nixos/daysuntil.nix
+            git -C "$WORK" \
+              -c user.name="gitea-runner" \
+              -c user.email="ci@meganix.hhlab.home.arpa" \
+              commit -m "daysuntil: deploy ${{ steps.version.outputs.value }}"
+            git -C "$WORK" push origin main
+          }
+
+          nixos-rebuild switch \
+            --no-reexec \
+            --flake "$WORK#vps-01" \
+            --target-host eduardo@10.100.0.1 \
+            --elevate=sudo
