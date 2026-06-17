@@ -236,6 +236,14 @@
   width: 100%;
 }
 
+.auth-signin-btn {
+  display: block;
+  width: 100%;
+  text-align: center;
+  text-decoration: none;
+  margin-top: 1.25rem;
+}
+
 .auth-oauth {
   margin-top: 1rem;
 }
