@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -22,6 +23,9 @@ func main() {
 		log.Fatalf("cookie security config: %v", err)
 	}
 
+	webOrigin := strings.TrimRight(strings.TrimSpace(os.Getenv("WEB_ORIGIN")), "/")
+	corsOrigins := parseCORSOrigins(os.Getenv("CORS_ORIGINS"))
+
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		log.Fatalf("open db: %v", err)
@@ -35,6 +39,7 @@ func main() {
 	h := &handler{
 		db:           db,
 		cookieSecure: cookieSecure,
+		webOrigin:    webOrigin,
 		oidc:         oidcCfg,
 		httpClient:   http.DefaultClient,
 		authLimiter:  newAuthRateLimiter(db),
@@ -51,7 +56,7 @@ func main() {
 		log.Printf("oidc: not configured (set OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET)")
 	}
 
-	r := newRouter(h)
+	r := newRouter(h, corsOrigins)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -59,4 +64,15 @@ func main() {
 	}
 	log.Printf("listening on :%s", port)
 	log.Fatal(newHTTPServer(":"+port, r).ListenAndServe())
+}
+
+func parseCORSOrigins(val string) []string {
+	var origins []string
+	for _, o := range strings.Split(val, ",") {
+		o = strings.TrimRight(strings.TrimSpace(o), "/")
+		if o != "" {
+			origins = append(origins, o)
+		}
+	}
+	return origins
 }

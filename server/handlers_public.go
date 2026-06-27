@@ -29,7 +29,3 @@ func (h *handler) publicShareGroup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, profile)
 }
 
-func servePublicGroupApp(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
-	http.ServeFile(w, r, "static/index.html")
-}

@@ -42,7 +42,7 @@ func newTestServerWithHandler(t *testing.T, h *handler) (*sql.DB, http.Handler) 
 	}
 
 	h.db = db
-	return db, newRouter(h)
+	return db, newRouter(h, nil)
 }
 
 func performRequest(t *testing.T, h http.Handler, method, path, body string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
@@ -320,10 +320,10 @@ func TestVersionEndpoint(t *testing.T) {
 	}
 }
 
-func TestStaticResponsesIncludeSecurityHeaders(t *testing.T) {
+func TestAPIResponsesIncludeSecurityHeaders(t *testing.T) {
 	_, router := newTestServer(t)
 
-	rec := performRequest(t, router, http.MethodGet, "/", "")
+	rec := performRequest(t, router, http.MethodGet, "/api/version", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
 	}

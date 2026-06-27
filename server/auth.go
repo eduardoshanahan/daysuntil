@@ -346,26 +346,36 @@ func userFromContext(ctx context.Context) (User, error) {
 	return user, nil
 }
 
-func setSessionCookie(w http.ResponseWriter, token string, expiresAt time.Time, secure bool) {
+func setSessionCookie(w http.ResponseWriter, token string, expiresAt time.Time, secure, crossOrigin bool) {
+	sameSite := http.SameSiteLaxMode
+	if crossOrigin {
+		sameSite = http.SameSiteNoneMode
+		secure = true
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSite,
 		Secure:   secure,
 		Expires:  expiresAt,
 		MaxAge:   int(time.Until(expiresAt).Seconds()),
 	})
 }
 
-func clearSessionCookie(w http.ResponseWriter, secure bool) {
+func clearSessionCookie(w http.ResponseWriter, secure, crossOrigin bool) {
+	sameSite := http.SameSiteLaxMode
+	if crossOrigin {
+		sameSite = http.SameSiteNoneMode
+		secure = true
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSite,
 		Secure:   secure,
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),

@@ -35,11 +35,21 @@ type versionResponse struct {
 type handler struct {
 	db           *sql.DB
 	cookieSecure bool
+	webOrigin    string
 	oidc         oidcConfig
 	oidcRT       *oidcRuntime
 	httpClient   *http.Client
 	authLimiter  *authRateLimiter
 }
+
+func (h *handler) homeURL() string {
+	if h.webOrigin != "" {
+		return h.webOrigin + "/"
+	}
+	return "/"
+}
+
+func (h *handler) crossOrigin() bool { return h.webOrigin != "" }
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")

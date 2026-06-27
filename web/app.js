@@ -1177,6 +1177,9 @@ colorSwatches.addEventListener('click', event => {
 });
 
 async function initPrivateApp() {
+  const signinLink = document.querySelector('.auth-signin-btn');
+  if (signinLink) signinLink.href = (window.API_BASE || '') + '/api/oidc/start';
+
   const params = new URLSearchParams(window.location.search);
   const authErrorMessage = params.get('auth_error');
 

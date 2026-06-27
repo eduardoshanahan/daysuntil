@@ -10,7 +10,8 @@
   async function apiFetch(path, options = {}) {
     let res;
     try {
-      res = await fetch(path, {
+      res = await fetch((window.API_BASE || '') + path, {
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
         ...options,
       });

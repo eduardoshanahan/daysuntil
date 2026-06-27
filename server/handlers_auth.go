@@ -15,7 +15,7 @@ func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 		_ = deleteSession(h.db, cookie.Value)
 	}
 
-	clearSessionCookie(w, h.cookieSecure)
+	clearSessionCookie(w, h.cookieSecure, h.crossOrigin())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -44,7 +44,7 @@ func (h *handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clearSessionCookie(w, h.cookieSecure)
+	clearSessionCookie(w, h.cookieSecure, h.crossOrigin())
 	w.WriteHeader(http.StatusNoContent)
 }
 

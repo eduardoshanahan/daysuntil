@@ -12,7 +12,6 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -ldflags="-X main.versi
 FROM alpine:3.20
 WORKDIR /app
 COPY --from=builder /app/daysuntil .
-COPY static/ ./static/
 VOLUME /data
 ENV DB_PATH=/data/daysuntil.db
 EXPOSE 8080

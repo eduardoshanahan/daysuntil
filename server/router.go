@@ -7,11 +7,14 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-func newRouter(h *handler) http.Handler {
+func newRouter(h *handler, corsOrigins []string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(pathOnlyLogger)
 	r.Use(middleware.Recoverer)
 	r.Use(securityHeadersMiddleware(h.cookieSecure))
+	if len(corsOrigins) > 0 {
+		r.Use(corsMiddleware(corsOrigins))
+	}
 
 	r.Route("/api", func(r chi.Router) {
 		r.Use(noStoreMiddleware)
@@ -27,11 +30,6 @@ func newRouter(h *handler) http.Handler {
 
 	r.Get("/api/oidc/start", h.oidcStart)
 	r.Get("/api/oidc/callback", h.oidcCallback)
-
-	r.Get("/g/{groupSlug}", servePublicGroupApp)
-	r.Get("/help", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "static/help.html")
-	})
 
 	r.Route("/api/intervals", func(r chi.Router) {
 		r.Use(authMiddleware(h))
@@ -51,6 +49,5 @@ func newRouter(h *handler) http.Handler {
 		r.Post("/{id}/rotate", h.rotateShareGroup)
 	})
 
-	r.Handle("/*", http.FileServer(http.Dir("static")))
 	return r
 }
