@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -15,7 +16,7 @@ func (h *handler) publicShareGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	profile, err := publicShareGroupBySlug(h.db, groupSlug)
+	raw, err := publicShareGroupBySlug(h.db, groupSlug)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			http.Error(w, "not found", http.StatusNotFound)
@@ -25,7 +26,21 @@ func (h *handler) publicShareGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	owner, err := h.profileClient.GetBySub(r.Context(), raw.OwnerSub)
+	if err != nil {
+		log.Printf("public share group: resolve owner profile failed: %v", err)
+		http.Error(w, "failed to load share group", http.StatusInternalServerError)
+		return
+	}
+
+	profile := PublicShareGroup{
+		Name:          raw.Name,
+		PublicSlug:    raw.PublicSlug,
+		OwnerName:     owner.DisplayName,
+		OwnerUsername: owner.Username,
+		Intervals:     raw.Intervals,
+	}
+
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 	writeJSON(w, profile)
 }
-

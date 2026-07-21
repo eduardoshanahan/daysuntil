@@ -69,7 +69,7 @@ func parseDescribeOutput(s string) string {
 	if prevDash < 0 {
 		return withoutSHA
 	}
-	base := withoutSHA[:prevDash]        // e.g. "v0.1.0"
+	base := withoutSHA[:prevDash]       // e.g. "v0.1.0"
 	countStr := withoutSHA[prevDash+1:] // e.g. "5"
 
 	count, err := strconv.Atoi(countStr)

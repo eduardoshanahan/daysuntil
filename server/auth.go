@@ -26,73 +26,35 @@ type contextKey string
 
 const userContextKey contextKey = "authenticated-user"
 
+// User is daysuntil's local identity anchor — just enough to key
+// sessions, intervals, and share_groups by. Profile data (username,
+// display name, etc.) lives in profile-service and is fetched separately
+// via ProfileClient, keyed by OIDCSub.
 type User struct {
-	ID          int64  `json:"id"`
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name"`
-	PublicSlug  string `json:"public_slug"`
-	UsernameSet bool   `json:"username_set"`
+	ID      int64
+	OIDCSub string
 }
 
 func initAuthDB(db *sql.DB) error {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS users (
-		id           INTEGER PRIMARY KEY AUTOINCREMENT,
-		oidc_sub     TEXT NOT NULL DEFAULT '',
-		username     TEXT NOT NULL UNIQUE,
-		public_slug  TEXT NOT NULL DEFAULT '',
-		display_name TEXT NOT NULL DEFAULT '',
-		created_at   TEXT NOT NULL,
-		username_set INTEGER NOT NULL DEFAULT 0
+		id         BIGSERIAL PRIMARY KEY,
+		oidc_sub   TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 	)`)
 	if err != nil {
 		return err
 	}
 
-	if err := renameUserColumnIfExists(db, "zitadel_sub", "oidc_sub"); err != nil {
-		return err
-	}
-	if err := ensureUserColumn(db, "oidc_sub", "ALTER TABLE users ADD COLUMN oidc_sub TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := ensureUserColumn(db, "display_name", "ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := ensureUserColumn(db, "public_slug", "ALTER TABLE users ADD COLUMN public_slug TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := ensureUserColumn(db, "username_set", "ALTER TABLE users ADD COLUMN username_set INTEGER NOT NULL DEFAULT 0"); err != nil {
-		return err
-	}
-
-	if err := dropUserColumnIfExists(db, "password_hash"); err != nil {
-		return err
-	}
-	if _, err := db.Exec(`DROP INDEX IF EXISTS idx_users_email`); err != nil {
-		return err
-	}
-	if err := dropUserColumnIfExists(db, "email"); err != nil {
-		return err
-	}
-
-	_, err = db.Exec(`DROP INDEX IF EXISTS idx_users_zitadel_sub`)
-	if err != nil {
-		return err
-	}
 	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oidc_sub ON users(oidc_sub) WHERE oidc_sub <> ''`)
-	if err != nil {
-		return err
-	}
-	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_slug ON users(public_slug) WHERE public_slug <> ''`)
 	if err != nil {
 		return err
 	}
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS sessions (
 		id         TEXT PRIMARY KEY,
-		user_id    INTEGER NOT NULL,
-		expires_at TEXT NOT NULL,
-		created_at TEXT NOT NULL,
-		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+		user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		expires_at TIMESTAMPTZ NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 	)`)
 	if err != nil {
 		return err
@@ -111,99 +73,22 @@ func initAuthDB(db *sql.DB) error {
 	return nil
 }
 
-func ensureUserColumn(db *sql.DB, column, statement string) error {
-	exists, err := tableColumnExists(db, "users", column)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return nil
-	}
-	_, err = db.Exec(statement)
-	return err
-}
-
-func dropUserColumnIfExists(db *sql.DB, column string) error {
-	exists, err := tableColumnExists(db, "users", column)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return nil
-	}
-	_, err = db.Exec("ALTER TABLE users DROP COLUMN " + column)
-	return err
-}
-
-func renameUserColumnIfExists(db *sql.DB, oldColumn, newColumn string) error {
-	exists, err := tableColumnExists(db, "users", oldColumn)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return nil
-	}
-	_, err = db.Exec("ALTER TABLE users RENAME COLUMN " + oldColumn + " TO " + newColumn)
-	return err
-}
-
-func validateUsername(username string) (string, error) {
-	username = strings.ToLower(strings.TrimSpace(username))
-	if username == "" {
-		return "", fmt.Errorf("username is required")
-	}
-	if strings.HasPrefix(username, "pending-") {
-		return "", fmt.Errorf("username is not available")
-	}
-	if len(username) < 3 {
-		return "", fmt.Errorf("username must be at least 3 characters")
-	}
-	if len(username) > 64 {
-		return "", fmt.Errorf("username must be at most 64 characters")
-	}
-	for _, r := range username {
-		isValid := r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.'
-		if !isValid {
-			return "", fmt.Errorf("username may only contain letters, numbers, dots, dashes, and underscores")
-		}
-	}
-	return username, nil
-}
-
-func randomPlaceholderUsername() (string, error) {
-	buf := make([]byte, 8)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("pending-%x", buf), nil
-}
-
-func findOrCreateOIDCUser(db *sql.DB, sub, displayName string) (User, error) {
+// findOrCreateLocalUser looks up (or creates) daysuntil's local identity
+// anchor row for an OIDC sub. It does not touch profile data — callers
+// (the OIDC callback handler) are responsible for also calling
+// ProfileClient.FindOrCreate so a profile-service profile exists.
+func findOrCreateLocalUser(db *sql.DB, sub string) (User, error) {
 	if sub == "" {
 		return User{}, fmt.Errorf("oidc sub is required")
 	}
 
 	var user User
-	var usernameSet int
-	err := db.QueryRow(
-		`SELECT id, username, public_slug, display_name, username_set FROM users WHERE oidc_sub=?`,
-		sub,
-	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &usernameSet)
+	err := db.QueryRow(`SELECT id, oidc_sub FROM users WHERE oidc_sub=$1`, sub).Scan(&user.ID, &user.OIDCSub)
 	if err == nil {
-		user.UsernameSet = usernameSet == 1
 		return user, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return User{}, err
-	}
-
-	placeholderUsername, err := randomPlaceholderUsername()
-	if err != nil {
-		return User{}, err
-	}
-
-	if strings.TrimSpace(displayName) == "" {
-		displayName = "user"
 	}
 
 	tx, err := db.Begin()
@@ -217,24 +102,14 @@ func findOrCreateOIDCUser(db *sql.DB, sub, displayName string) (User, error) {
 		return User{}, err
 	}
 
-	res, err := tx.Exec(
-		`INSERT INTO users (oidc_sub, username, display_name, created_at, username_set) VALUES (?, ?, ?, ?, 0)`,
-		sub, placeholderUsername, displayName, time.Now().UTC().Format(time.RFC3339),
-	)
-	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return findOrCreateOIDCUser(db, sub, displayName)
-		}
-		return User{}, err
-	}
-
-	userID, err := res.LastInsertId()
+	var userID int64
+	err = tx.QueryRow(`INSERT INTO users (oidc_sub) VALUES ($1) RETURNING id`, sub).Scan(&userID)
 	if err != nil {
 		return User{}, err
 	}
 
 	if userCount == 0 {
-		if _, err := tx.Exec(`UPDATE intervals SET user_id=? WHERE user_id IS NULL`, userID); err != nil {
+		if _, err := tx.Exec(`UPDATE intervals SET user_id=$1 WHERE user_id IS NULL`, userID); err != nil {
 			return User{}, err
 		}
 	}
@@ -243,12 +118,7 @@ func findOrCreateOIDCUser(db *sql.DB, sub, displayName string) (User, error) {
 		return User{}, err
 	}
 
-	publicSlug, err := ensurePublicSlug(db, userID, "")
-	if err != nil {
-		return User{}, err
-	}
-
-	return User{ID: userID, Username: placeholderUsername, DisplayName: displayName, PublicSlug: publicSlug, UsernameSet: false}, nil
+	return User{ID: userID, OIDCSub: sub}, nil
 }
 
 func createSession(db *sql.DB, userID int64) (string, time.Time, error) {
@@ -260,8 +130,8 @@ func createSession(db *sql.DB, userID int64) (string, time.Time, error) {
 	sessionID := hashToken(rawToken)
 	expiresAt := time.Now().UTC().Add(sessionTTL)
 	_, err = db.Exec(
-		`INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)`,
-		sessionID, userID, expiresAt.Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339),
+		`INSERT INTO sessions (id, user_id, expires_at) VALUES ($1, $2, $3)`,
+		sessionID, userID, expiresAt,
 	)
 	if err != nil {
 		return "", time.Time{}, err
@@ -274,42 +144,31 @@ func deleteSession(db *sql.DB, rawToken string) error {
 	if strings.TrimSpace(rawToken) == "" {
 		return nil
 	}
-	_, err := db.Exec(`DELETE FROM sessions WHERE id=?`, hashToken(rawToken))
+	_, err := db.Exec(`DELETE FROM sessions WHERE id=$1`, hashToken(rawToken))
 	return err
 }
 
 func findUserBySession(db *sql.DB, rawToken string) (User, error) {
 	var user User
-	var expiresAt string
-	var usernameSet int
+	var expiresAt time.Time
 
 	err := db.QueryRow(
-		`SELECT u.id, u.username, u.public_slug, u.display_name, u.username_set, s.expires_at
+		`SELECT u.id, u.oidc_sub, s.expires_at
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
-		WHERE s.id=?`,
+		WHERE s.id=$1`,
 		hashToken(rawToken),
-	).Scan(&user.ID, &user.Username, &user.PublicSlug, &user.DisplayName, &usernameSet, &expiresAt)
+	).Scan(&user.ID, &user.OIDCSub, &expiresAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, ErrNotFound
 		}
 		return User{}, err
 	}
-	user.UsernameSet = usernameSet == 1
 
-	expiresTime, err := time.Parse(time.RFC3339, expiresAt)
-	if err != nil {
-		return User{}, err
-	}
-	if !expiresTime.After(time.Now().UTC()) {
+	if !expiresAt.After(time.Now().UTC()) {
 		_ = deleteSession(db, rawToken)
 		return User{}, ErrNotFound
-	}
-
-	user.PublicSlug, err = ensurePublicSlug(db, user.ID, user.PublicSlug)
-	if err != nil {
-		return User{}, err
 	}
 
 	return user, nil

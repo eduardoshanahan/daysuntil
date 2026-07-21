@@ -97,9 +97,15 @@ func (h *handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		displayName = claims.PreferredUsername
 	}
 
-	user, err := findOrCreateOIDCUser(h.db, claims.Sub, displayName)
+	user, err := findOrCreateLocalUser(h.db, claims.Sub)
 	if err != nil {
-		log.Printf("oidc: find/create user failed: %v", err)
+		log.Printf("oidc: find/create local user failed: %v", err)
+		http.Redirect(w, r, home+"?auth_error="+url.QueryEscape("Sign-in failed. Please try again."), http.StatusFound)
+		return
+	}
+
+	if _, err := h.profileClient.FindOrCreate(ctx, claims.Sub, displayName); err != nil {
+		log.Printf("oidc: find/create profile failed: %v", err)
 		http.Redirect(w, r, home+"?auth_error="+url.QueryEscape("Sign-in failed. Please try again."), http.StatusFound)
 		return
 	}

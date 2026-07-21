@@ -54,20 +54,16 @@ func newAuthRateLimiter(db *sql.DB) *authRateLimiter {
 }
 
 func (l *authRateLimiter) loadFromDB() {
-	now := l.now().UTC().Format(time.RFC3339)
-	rows, err := l.db.Query(`SELECT key, count, reset_at FROM rate_limit_buckets WHERE reset_at > ?`, now)
+	rows, err := l.db.Query(`SELECT key, count, reset_at FROM rate_limit_buckets WHERE reset_at > $1`, l.now().UTC())
 	if err != nil {
 		return
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var key, resetAtStr string
+		var key string
 		var count int
-		if err := rows.Scan(&key, &count, &resetAtStr); err != nil {
-			continue
-		}
-		resetAt, err := time.Parse(time.RFC3339, resetAtStr)
-		if err != nil {
+		var resetAt time.Time
+		if err := rows.Scan(&key, &count, &resetAt); err != nil {
 			continue
 		}
 		l.buckets[key] = authRateBucket{count: count, resetAt: resetAt}
@@ -79,8 +75,9 @@ func (l *authRateLimiter) persistBucket(key string, bucket authRateBucket) {
 		return
 	}
 	_, _ = l.db.Exec(
-		`INSERT OR REPLACE INTO rate_limit_buckets (key, count, reset_at) VALUES (?, ?, ?)`,
-		key, bucket.count, bucket.resetAt.UTC().Format(time.RFC3339),
+		`INSERT INTO rate_limit_buckets (key, count, reset_at) VALUES ($1, $2, $3)
+		ON CONFLICT (key) DO UPDATE SET count = EXCLUDED.count, reset_at = EXCLUDED.reset_at`,
+		key, bucket.count, bucket.resetAt.UTC(),
 	)
 }
 
@@ -123,7 +120,7 @@ func (l *authRateLimiter) cleanupExpired(now time.Time) {
 		}
 	}
 	if l.db != nil {
-		_, _ = l.db.Exec(`DELETE FROM rate_limit_buckets WHERE reset_at <= ?`, now.UTC().Format(time.RFC3339))
+		_, _ = l.db.Exec(`DELETE FROM rate_limit_buckets WHERE reset_at <= $1`, now.UTC())
 	}
 }
 

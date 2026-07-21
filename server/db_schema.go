@@ -8,29 +8,15 @@ func initDB(db *sql.DB) error {
 	}
 
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS intervals (
-		id         INTEGER PRIMARY KEY AUTOINCREMENT,
-		user_id    INTEGER,
+		id         BIGSERIAL PRIMARY KEY,
+		user_id    BIGINT REFERENCES users(id) ON DELETE CASCADE,
 		name       TEXT NOT NULL,
 		start_date TEXT NOT NULL,
 		end_date   TEXT NOT NULL,
 		color      TEXT NOT NULL DEFAULT '#4f8ef7',
-		position   INTEGER NOT NULL DEFAULT 0,
-		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+		position   INTEGER NOT NULL DEFAULT 0
 	)`)
 	if err != nil {
-		return err
-	}
-
-	if err := ensureIntervalColumn(db, "color", "ALTER TABLE intervals ADD COLUMN color TEXT NOT NULL DEFAULT '#4f8ef7'"); err != nil {
-		return err
-	}
-	if err := ensureIntervalColumn(db, "user_id", "ALTER TABLE intervals ADD COLUMN user_id INTEGER"); err != nil {
-		return err
-	}
-	if err := ensureIntervalColumn(db, "position", "ALTER TABLE intervals ADD COLUMN position INTEGER NOT NULL DEFAULT 0"); err != nil {
-		return err
-	}
-	if err := backfillIntervalPositions(db); err != nil {
 		return err
 	}
 
@@ -40,12 +26,11 @@ func initDB(db *sql.DB) error {
 	}
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS share_groups (
-		id          INTEGER PRIMARY KEY AUTOINCREMENT,
-		user_id     INTEGER NOT NULL,
+		id          BIGSERIAL PRIMARY KEY,
+		user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 		name        TEXT NOT NULL,
 		public_slug TEXT NOT NULL,
-		created_at  TEXT NOT NULL,
-		FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+		created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 	)`)
 	if err != nil {
 		return err
@@ -60,11 +45,9 @@ func initDB(db *sql.DB) error {
 	}
 
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS interval_share_groups (
-		interval_id    INTEGER NOT NULL,
-		share_group_id INTEGER NOT NULL,
-		PRIMARY KEY(interval_id, share_group_id),
-		FOREIGN KEY(interval_id) REFERENCES intervals(id) ON DELETE CASCADE,
-		FOREIGN KEY(share_group_id) REFERENCES share_groups(id) ON DELETE CASCADE
+		interval_id    BIGINT NOT NULL REFERENCES intervals(id) ON DELETE CASCADE,
+		share_group_id BIGINT NOT NULL REFERENCES share_groups(id) ON DELETE CASCADE,
+		PRIMARY KEY(interval_id, share_group_id)
 	)`)
 	if err != nil {
 		return err
@@ -77,53 +60,11 @@ func initDB(db *sql.DB) error {
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS rate_limit_buckets (
 		key      TEXT PRIMARY KEY,
 		count    INTEGER NOT NULL,
-		reset_at TEXT NOT NULL
+		reset_at TIMESTAMPTZ NOT NULL
 	)`)
 	if err != nil {
 		return err
 	}
 
 	return nil
-}
-
-func ensureIntervalColumn(db *sql.DB, column, statement string) error {
-	exists, err := intervalColumnExists(db, column)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return nil
-	}
-	_, err = db.Exec(statement)
-	return err
-}
-
-func intervalColumnExists(db *sql.DB, column string) (bool, error) {
-	return tableColumnExists(db, "intervals", column)
-}
-
-func tableColumnExists(db *sql.DB, tableName, column string) (bool, error) {
-	rows, err := db.Query(`PRAGMA table_info(` + tableName + `)`)
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var (
-			cid        int
-			name       string
-			dataType   string
-			notNull    int
-			defaultVal sql.NullString
-			pk         int
-		)
-		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultVal, &pk); err != nil {
-			return false, err
-		}
-		if name == column {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
 }

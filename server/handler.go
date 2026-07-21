@@ -33,13 +33,14 @@ type versionResponse struct {
 }
 
 type handler struct {
-	db           *sql.DB
-	cookieSecure bool
-	webOrigin    string
-	oidc         oidcConfig
-	oidcRT       *oidcRuntime
-	httpClient   *http.Client
-	authLimiter  *authRateLimiter
+	db            *sql.DB
+	cookieSecure  bool
+	webOrigin     string
+	oidc          oidcConfig
+	oidcRT        *oidcRuntime
+	httpClient    *http.Client
+	authLimiter   *authRateLimiter
+	profileClient ProfileClient
 }
 
 func (h *handler) homeURL() string {

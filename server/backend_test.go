@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -10,30 +13,51 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	_ "modernc.org/sqlite"
 )
 
 var shareGroupSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+){3}$`)
 
+// openTestDB creates a fresh, uniquely-named database on the shared
+// ephemeral test Postgres cluster (see TestMain in testmain_test.go) and
+// drops it on cleanup — giving each test the same full isolation the old
+// SQLite :memory: databases provided.
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 
-	db, err := sql.Open("sqlite", ":memory:")
+	adminDB, err := sql.Open("pgx", testDatabaseDSN(testSockDir, "postgres"))
 	if err != nil {
-		t.Fatalf("open db: %v", err)
+		t.Fatalf("open admin db: %v", err)
+	}
+	defer adminDB.Close()
+
+	dbName := fmt.Sprintf("daysuntil_test_%d_%d", time.Now().UnixNano(), rand.Int63())
+	if _, err := adminDB.Exec(`CREATE DATABASE ` + dbName); err != nil {
+		t.Fatalf("create test db: %v", err)
+	}
+	t.Cleanup(func() {
+		admin, err := sql.Open("pgx", testDatabaseDSN(testSockDir, "postgres"))
+		if err != nil {
+			return
+		}
+		defer admin.Close()
+		admin.Exec(`DROP DATABASE IF EXISTS ` + dbName + ` WITH (FORCE)`)
+	})
+
+	db, err := sql.Open("pgx", testDatabaseDSN(testSockDir, dbName))
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
 
 	return db
 }
 
-func newTestServer(t *testing.T) (*sql.DB, http.Handler) {
+func newTestServer(t *testing.T) (*sql.DB, http.Handler, *fakeProfileClient) {
 	t.Helper()
 	return newTestServerWithHandler(t, &handler{authLimiter: newAuthRateLimiter(nil)})
 }
 
-func newTestServerWithHandler(t *testing.T, h *handler) (*sql.DB, http.Handler) {
+func newTestServerWithHandler(t *testing.T, h *handler) (*sql.DB, http.Handler, *fakeProfileClient) {
 	t.Helper()
 
 	db := openTestDB(t)
@@ -42,7 +66,9 @@ func newTestServerWithHandler(t *testing.T, h *handler) (*sql.DB, http.Handler) 
 	}
 
 	h.db = db
-	return db, newRouter(h, nil)
+	profiles := newFakeProfileClient()
+	h.profileClient = profiles
+	return db, newRouter(h, nil), profiles
 }
 
 func performRequest(t *testing.T, h http.Handler, method, path, body string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
@@ -67,10 +93,10 @@ func performRequestFromRemoteAddr(t *testing.T, h http.Handler, method, path, bo
 	return rec
 }
 
-func decodeUser(t *testing.T, rec *httptest.ResponseRecorder) User {
+func decodeUser(t *testing.T, rec *httptest.ResponseRecorder) meResponse {
 	t.Helper()
 
-	var user User
+	var user meResponse
 	if err := json.NewDecoder(rec.Body).Decode(&user); err != nil {
 		t.Fatalf("decode user: %v", err)
 	}
@@ -87,24 +113,29 @@ func decodeShareGroup(t *testing.T, rec *httptest.ResponseRecorder) ShareGroup {
 	return group
 }
 
-// createTestUser inserts an OIDC-authenticated user directly into the DB and
-// returns a valid session cookie and the User record. This replaces the
-// register+login flow that no longer exists after switching to OIDC.
-func createTestUser(t *testing.T, db *sql.DB, sub, username string) (*http.Cookie, User) {
+// createTestUser inserts an OIDC-authenticated user directly into the DB
+// and profile-service fake, and returns a valid session cookie plus the
+// local identity anchor. This replaces the register+login flow that no
+// longer exists after switching to OIDC.
+func createTestUser(t *testing.T, db *sql.DB, profiles *fakeProfileClient, sub, username string) (*http.Cookie, User) {
 	t.Helper()
+	ctx := context.Background()
 
-	user, err := findOrCreateOIDCUser(db, sub, username)
+	user, err := findOrCreateLocalUser(db, sub)
 	if err != nil {
 		t.Fatalf("create test user: %v", err)
 	}
 
+	if _, err := profiles.FindOrCreate(ctx, sub, username); err != nil {
+		t.Fatalf("create test profile: %v", err)
+	}
+
 	// Set a real username so tests can use share groups etc.
-	updated, err := setUserUsername(db, user.ID, username)
-	if err != nil {
+	if _, err := profiles.Update(ctx, sub, ProfilePatch{Username: &username}); err != nil {
 		t.Fatalf("set test username: %v", err)
 	}
 
-	rawToken, expiresAt, err := createSession(db, updated.ID)
+	rawToken, expiresAt, err := createSession(db, user.ID)
 	if err != nil {
 		t.Fatalf("create test session: %v", err)
 	}
@@ -114,7 +145,7 @@ func createTestUser(t *testing.T, db *sql.DB, sub, username string) (*http.Cooki
 		Value:   rawToken,
 		Expires: expiresAt,
 	}
-	return cookie, updated
+	return cookie, user
 }
 
 func createShareGroupForTest(t *testing.T, router http.Handler, cookie *http.Cookie, name string) ShareGroup {
@@ -140,95 +171,6 @@ func assertShareGroupSlug(t *testing.T, slug string) {
 	}
 	if len(parts[3]) != shareGroupSlugSuffixLength {
 		t.Fatalf("expected suffix length %d, got %d in %q", shareGroupSlugSuffixLength, len(parts[3]), slug)
-	}
-}
-
-func TestInitDBAddsColumnsToLegacySchema(t *testing.T) {
-	db := openTestDB(t)
-
-	_, err := db.Exec(`CREATE TABLE intervals (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		name TEXT NOT NULL,
-		start_date TEXT NOT NULL,
-		end_date TEXT NOT NULL
-	)`)
-	if err != nil {
-		t.Fatalf("create legacy table: %v", err)
-	}
-
-	if err := initDB(db); err != nil {
-		t.Fatalf("init db: %v", err)
-	}
-
-	for _, column := range []string{"color", "user_id"} {
-		exists, err := intervalColumnExists(db, column)
-		if err != nil {
-			t.Fatalf("check %s column: %v", column, err)
-		}
-		if !exists {
-			t.Fatalf("expected %s column after migration", column)
-		}
-	}
-}
-
-func TestInitDBDropsPasswordHashFromLegacySchema(t *testing.T) {
-	db := openTestDB(t)
-
-	// Simulate the pre-OIDC schema: password_hash TEXT NOT NULL with no default.
-	_, err := db.Exec(`CREATE TABLE users (
-		id            INTEGER PRIMARY KEY AUTOINCREMENT,
-		username      TEXT NOT NULL UNIQUE,
-		display_name  TEXT NOT NULL DEFAULT '',
-		password_hash TEXT NOT NULL,
-		created_at    TEXT NOT NULL
-	)`)
-	if err != nil {
-		t.Fatalf("create legacy users table: %v", err)
-	}
-
-	if err := initDB(db); err != nil {
-		t.Fatalf("init db: %v", err)
-	}
-
-	// password_hash should be gone so OIDC INSERTs don't fail.
-	exists, err := tableColumnExists(db, "users", "password_hash")
-	if err != nil {
-		t.Fatalf("check password_hash column: %v", err)
-	}
-	if exists {
-		t.Fatal("expected password_hash column to be dropped after migration")
-	}
-
-	// Confirm an OIDC user can actually be inserted after migration.
-	if _, err := findOrCreateOIDCUser(db, "sub-test-001", "Test User"); err != nil {
-		t.Fatalf("findOrCreateOIDCUser failed after migration: %v", err)
-	}
-}
-
-func TestInitDBAddsOIDCSubColumnToLegacyUsersSchema(t *testing.T) {
-	db := openTestDB(t)
-
-	_, err := db.Exec(`CREATE TABLE users (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		username TEXT NOT NULL UNIQUE,
-		display_name TEXT NOT NULL DEFAULT '',
-		password_hash TEXT NOT NULL DEFAULT '',
-		created_at TEXT NOT NULL
-	)`)
-	if err != nil {
-		t.Fatalf("create legacy users table: %v", err)
-	}
-
-	if err := initDB(db); err != nil {
-		t.Fatalf("init db: %v", err)
-	}
-
-	exists, err := tableColumnExists(db, "users", "oidc_sub")
-	if err != nil {
-		t.Fatalf("check oidc_sub column: %v", err)
-	}
-	if !exists {
-		t.Fatalf("expected oidc_sub column after migration")
 	}
 }
 
@@ -265,19 +207,23 @@ func TestValidateIntervalAllowsSameDayRange(t *testing.T) {
 }
 
 func TestFirstOIDCUserAdoptsLegacyIntervals(t *testing.T) {
-	db, router := newTestServer(t)
+	db, router, profiles := newTestServer(t)
 
 	_, err := db.Exec(
-		`INSERT INTO intervals (name, start_date, end_date, color, user_id) VALUES (?, ?, ?, ?, NULL)`,
+		`INSERT INTO intervals (name, start_date, end_date, color, user_id) VALUES ($1, $2, $3, $4, NULL)`,
 		"Legacy Trip", "2026-05-20", "2026-05-30", "#4f8ef7",
 	)
 	if err != nil {
 		t.Fatalf("insert legacy interval: %v", err)
 	}
 
-	cookie, user := createTestUser(t, db, "sub-alice-001", "alice")
-	if user.Username != "alice" {
-		t.Fatalf("expected username alice, got %q", user.Username)
+	cookie, user := createTestUser(t, db, profiles, "sub-alice-001", "alice")
+	profile, err := profiles.GetBySub(context.Background(), user.OIDCSub)
+	if err != nil {
+		t.Fatalf("get test profile: %v", err)
+	}
+	if profile.Username != "alice" {
+		t.Fatalf("expected username alice, got %q", profile.Username)
 	}
 
 	rec := performRequest(t, router, http.MethodGet, "/api/intervals", "", cookie)
@@ -295,7 +241,7 @@ func TestFirstOIDCUserAdoptsLegacyIntervals(t *testing.T) {
 }
 
 func TestIntervalsRequireAuthentication(t *testing.T) {
-	_, router := newTestServer(t)
+	_, router, _ := newTestServer(t)
 
 	rec := performRequest(t, router, http.MethodGet, "/api/intervals", "")
 	if rec.Code != http.StatusUnauthorized {
@@ -304,7 +250,7 @@ func TestIntervalsRequireAuthentication(t *testing.T) {
 }
 
 func TestVersionEndpoint(t *testing.T) {
-	_, router := newTestServer(t)
+	_, router, _ := newTestServer(t)
 
 	rec := performRequest(t, router, http.MethodGet, "/api/version", "")
 	if rec.Code != http.StatusOK {
@@ -321,7 +267,7 @@ func TestVersionEndpoint(t *testing.T) {
 }
 
 func TestAPIResponsesIncludeSecurityHeaders(t *testing.T) {
-	_, router := newTestServer(t)
+	_, router, _ := newTestServer(t)
 
 	rec := performRequest(t, router, http.MethodGet, "/api/version", "")
 	if rec.Code != http.StatusOK {
@@ -342,7 +288,7 @@ func TestAPIResponsesIncludeSecurityHeaders(t *testing.T) {
 }
 
 func TestAPIResponsesDisableCaching(t *testing.T) {
-	_, router := newTestServer(t)
+	_, router, _ := newTestServer(t)
 
 	rec := performRequest(t, router, http.MethodGet, "/api/version", "")
 	if rec.Code != http.StatusOK {
@@ -360,9 +306,9 @@ func TestAPIResponsesDisableCaching(t *testing.T) {
 }
 
 func TestCurrentUser(t *testing.T) {
-	db, router := newTestServer(t)
+	db, router, profiles := newTestServer(t)
 
-	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
+	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
 
 	me := performRequest(t, router, http.MethodGet, "/api/me", "", cookie)
 	if me.Code != http.StatusOK {
@@ -375,10 +321,10 @@ func TestCurrentUser(t *testing.T) {
 }
 
 func TestUsersOnlySeeTheirOwnIntervals(t *testing.T) {
-	db, router := newTestServer(t)
+	db, router, profiles := newTestServer(t)
 
-	aliceCookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
-	bobCookie, _ := createTestUser(t, db, "sub-bob-001", "bob")
+	aliceCookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
+	bobCookie, _ := createTestUser(t, db, profiles, "sub-bob-001", "bob")
 	bobGroup := createShareGroupForTest(t, router, bobCookie, "Bob Trips")
 
 	createAlice := performRequest(t, router, http.MethodPost, "/api/intervals", `{
@@ -439,9 +385,9 @@ func TestUsersOnlySeeTheirOwnIntervals(t *testing.T) {
 }
 
 func TestCreateIntervalRejectsUnknownFields(t *testing.T) {
-	db, router := newTestServer(t)
+	db, router, profiles := newTestServer(t)
 
-	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
+	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
 
 	rec := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 		"name":"Trip",
@@ -456,9 +402,9 @@ func TestCreateIntervalRejectsUnknownFields(t *testing.T) {
 }
 
 func TestUpdateDisplayName(t *testing.T) {
-	db, router := newTestServer(t)
+	db, router, profiles := newTestServer(t)
 
-	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
+	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
 	rec := performRequest(t, router, http.MethodPut, "/api/me/profile", `{"display_name":"Eduardo Shanahan"}`, cookie)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 updating profile, got %d (%s)", rec.Code, rec.Body.String())
@@ -471,9 +417,9 @@ func TestUpdateDisplayName(t *testing.T) {
 }
 
 func TestShareGroupsListCreateUpdateRotateAndDelete(t *testing.T) {
-	db, router := newTestServer(t)
+	db, router, profiles := newTestServer(t)
 
-	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
+	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
 	group := createShareGroupForTest(t, router, cookie, "Trips")
 	if group.PublicSlug == "" {
 		t.Fatal("expected public slug for share group")
@@ -518,9 +464,9 @@ func TestShareGroupsListCreateUpdateRotateAndDelete(t *testing.T) {
 }
 
 func TestIntervalsCanBeAssignedToShareGroup(t *testing.T) {
-	db, router := newTestServer(t)
+	db, router, profiles := newTestServer(t)
 
-	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
+	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
 	group := createShareGroupForTest(t, router, cookie, "Trips")
 
 	create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
@@ -547,9 +493,9 @@ func TestIntervalsCanBeAssignedToShareGroup(t *testing.T) {
 }
 
 func TestPublicShareGroupShowsOnlyAssignedIntervals(t *testing.T) {
-	db, router := newTestServer(t)
+	db, router, profiles := newTestServer(t)
 
-	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
+	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
 
 	updateProfile := performRequest(t, router, http.MethodPut, "/api/me/profile", `{"display_name":"Alice Public"}`, cookie)
 	if updateProfile.Code != http.StatusOK {
@@ -602,9 +548,9 @@ func TestPublicShareGroupShowsOnlyAssignedIntervals(t *testing.T) {
 }
 
 func TestPublicShareGroupReturnsNotFoundWhenGroupIsEmpty(t *testing.T) {
-	db, router := newTestServer(t)
+	db, router, profiles := newTestServer(t)
 
-	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
+	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
 	group := createShareGroupForTest(t, router, cookie, "Trips")
 
 	rec := performRequest(t, router, http.MethodGet, "/api/public/groups/"+group.PublicSlug, "")
@@ -614,9 +560,9 @@ func TestPublicShareGroupReturnsNotFoundWhenGroupIsEmpty(t *testing.T) {
 }
 
 func TestDeletingShareGroupMakesItsIntervalsPrivate(t *testing.T) {
-	db, router := newTestServer(t)
+	db, router, profiles := newTestServer(t)
 
-	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
+	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
 	group := createShareGroupForTest(t, router, cookie, "Trips")
 
 	create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
@@ -653,9 +599,9 @@ func TestDeletingShareGroupMakesItsIntervalsPrivate(t *testing.T) {
 }
 
 func TestMoveIntervalReordersList(t *testing.T) {
-	db, router := newTestServer(t)
+	db, router, profiles := newTestServer(t)
 
-	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
+	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
 
 	for _, name := range []string{"One", "Two", "Three"} {
 		create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
@@ -690,9 +636,9 @@ func TestMoveIntervalReordersList(t *testing.T) {
 }
 
 func TestMoveIntervalNormalizesLegacyZeroPositions(t *testing.T) {
-	db, router := newTestServer(t)
+	db, router, profiles := newTestServer(t)
 
-	cookie, user := createTestUser(t, db, "sub-legacy-001", "legacy")
+	cookie, user := createTestUser(t, db, profiles, "sub-legacy-001", "legacy")
 
 	for _, name := range []string{"First", "Second"} {
 		create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
@@ -707,7 +653,7 @@ func TestMoveIntervalNormalizesLegacyZeroPositions(t *testing.T) {
 		}
 	}
 
-	if _, err := db.Exec(`UPDATE intervals SET position=0 WHERE user_id=?`, user.ID); err != nil {
+	if _, err := db.Exec(`UPDATE intervals SET position=0 WHERE user_id=$1`, user.ID); err != nil {
 		t.Fatalf("reset positions to legacy zero values: %v", err)
 	}
 
@@ -734,9 +680,9 @@ func TestMoveIntervalNormalizesLegacyZeroPositions(t *testing.T) {
 }
 
 func TestCurrentUserResponseDoesNotExposeEmail(t *testing.T) {
-	db, router := newTestServer(t)
+	db, router, profiles := newTestServer(t)
 
-	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
+	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
 	rec := performRequest(t, router, http.MethodGet, "/api/me", "", cookie)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
@@ -750,9 +696,9 @@ func TestCurrentUserResponseDoesNotExposeEmail(t *testing.T) {
 }
 
 func TestDeleteAccountRemovesUserIntervalsGroupsAndSession(t *testing.T) {
-	db, router := newTestServer(t)
+	db, router, profiles := newTestServer(t)
 
-	cookie, _ := createTestUser(t, db, "sub-alice-001", "alice")
+	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
 	group := createShareGroupForTest(t, router, cookie, "Trips")
 
 	create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
@@ -821,7 +767,7 @@ func TestPublicLookupRateLimitReturnsTooManyRequests(t *testing.T) {
 	}
 	limiter.policies[authActionPublicLookup] = authRatePolicy{limit: 2, window: time.Minute}
 
-	_, router := newTestServerWithHandler(t, &handler{authLimiter: limiter})
+	_, router, _ := newTestServerWithHandler(t, &handler{authLimiter: limiter})
 
 	for attempt := 1; attempt <= 2; attempt++ {
 		rec := performRequestFromRemoteAddr(t, router, http.MethodGet, "/api/public/groups/nonexistent", "", "198.51.100.10:4567")

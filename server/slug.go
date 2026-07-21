@@ -2,8 +2,6 @@ package main
 
 import (
 	crand "crypto/rand"
-	"database/sql"
-	"fmt"
 	"math/big"
 	"strings"
 )
@@ -23,60 +21,6 @@ var publicSlugWords = []string{
 	"shadow", "shore", "silver", "sky", "solstice", "sparrow", "spring", "star",
 	"stone", "stream", "summer", "sunset", "thistle", "timber", "trill", "valley",
 	"velvet", "violet", "willow", "winter", "wren",
-}
-
-func ensurePublicSlug(db *sql.DB, userID int64, currentSlug string) (string, error) {
-	if strings.TrimSpace(currentSlug) != "" {
-		return currentSlug, nil
-	}
-
-	return assignPublicSlug(db, userID, true)
-}
-
-func rotatePublicSlug(db *sql.DB, userID int64) (string, error) {
-	return assignPublicSlug(db, userID, false)
-}
-
-func assignPublicSlug(db *sql.DB, userID int64, onlyIfBlank bool) (string, error) {
-	condition := ""
-	if onlyIfBlank {
-		condition = " AND public_slug=''"
-	}
-
-	for attempt := 0; attempt < 20; attempt++ {
-		slug, err := randomReadableSlug()
-		if err != nil {
-			return "", err
-		}
-
-		res, err := db.Exec(`UPDATE users SET public_slug=? WHERE id=?`+condition, slug, userID)
-		if err != nil {
-			errText := strings.ToLower(err.Error())
-			if strings.Contains(errText, "unique") {
-				continue
-			}
-			return "", err
-		}
-
-		rows, err := res.RowsAffected()
-		if err != nil {
-			return "", err
-		}
-		if rows > 0 {
-			return slug, nil
-		}
-
-		var existing string
-		err = db.QueryRow(`SELECT public_slug FROM users WHERE id=?`, userID).Scan(&existing)
-		if err != nil {
-			return "", err
-		}
-		if strings.TrimSpace(existing) != "" {
-			return existing, nil
-		}
-	}
-
-	return "", fmt.Errorf("failed to allocate public slug")
 }
 
 func randomReadableSlug() (string, error) {

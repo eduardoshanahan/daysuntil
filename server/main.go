@@ -8,13 +8,19 @@ import (
 	"os"
 	"strings"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {
-	dbPath := os.Getenv("DB_PATH")
-	if dbPath == "" {
-		dbPath = "daysuntil.db"
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		log.Fatal("DATABASE_URL is required")
+	}
+
+	profileServiceURL := strings.TrimSpace(os.Getenv("PROFILE_SERVICE_URL"))
+	profileServiceToken := strings.TrimSpace(os.Getenv("PROFILE_SERVICE_TOKEN"))
+	if profileServiceURL == "" || profileServiceToken == "" {
+		log.Fatal("PROFILE_SERVICE_URL and PROFILE_SERVICE_TOKEN are required")
 	}
 
 	oidcCfg := oidcConfigFromEnv()
@@ -26,7 +32,7 @@ func main() {
 	webOrigin := strings.TrimRight(strings.TrimSpace(os.Getenv("WEB_ORIGIN")), "/")
 	corsOrigins := parseCORSOrigins(os.Getenv("CORS_ORIGINS"))
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		log.Fatalf("open db: %v", err)
 	}
@@ -37,12 +43,13 @@ func main() {
 	}
 
 	h := &handler{
-		db:           db,
-		cookieSecure: cookieSecure,
-		webOrigin:    webOrigin,
-		oidc:         oidcCfg,
-		httpClient:   http.DefaultClient,
-		authLimiter:  newAuthRateLimiter(db),
+		db:            db,
+		cookieSecure:  cookieSecure,
+		webOrigin:     webOrigin,
+		oidc:          oidcCfg,
+		httpClient:    http.DefaultClient,
+		authLimiter:   newAuthRateLimiter(db),
+		profileClient: newHTTPProfileClient(profileServiceURL, profileServiceToken, http.DefaultClient),
 	}
 
 	if oidcCfg.Enabled() {

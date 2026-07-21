@@ -32,14 +32,3 @@ func validateInterval(input intervalInput, db *sql.DB, userID int64) ([]int64, e
 	}
 	return groupIDs, nil
 }
-
-func validateDisplayName(displayName string) (string, error) {
-	displayName = strings.TrimSpace(displayName)
-	if displayName == "" {
-		return "", fmt.Errorf("display_name is required")
-	}
-	if len(displayName) > 80 {
-		return "", fmt.Errorf("display_name must be at most 80 characters")
-	}
-	return displayName, nil
-}

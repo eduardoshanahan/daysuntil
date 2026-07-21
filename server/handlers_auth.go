@@ -5,6 +5,31 @@ import (
 	"net/http"
 )
 
+// meResponse merges daysuntil's local identity anchor with profile-service
+// data. The JSON shape matches what the frontend already expects
+// (username/display_name/username_set) plus the new profile fields.
+type meResponse struct {
+	ID          int64  `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	FirstName   string `json:"first_name"`
+	LastName    string `json:"last_name"`
+	AvatarURL   string `json:"avatar_url"`
+	UsernameSet bool   `json:"username_set"`
+}
+
+func meResponseFromProfile(user User, profile Profile) meResponse {
+	return meResponse{
+		ID:          user.ID,
+		Username:    profile.Username,
+		DisplayName: profile.DisplayName,
+		FirstName:   profile.FirstName,
+		LastName:    profile.LastName,
+		AvatarURL:   profile.AvatarURL,
+		UsernameSet: profile.UsernameSet,
+	}
+}
+
 func (h *handler) appVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, versionResponse{Version: currentVersion()})
 }
@@ -25,7 +50,14 @@ func (h *handler) currentUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	writeJSON(w, user)
+
+	profile, err := h.profileClient.GetBySub(r.Context(), user.OIDCSub)
+	if err != nil {
+		writeProfileClientError(w, err)
+		return
+	}
+
+	writeJSON(w, meResponseFromProfile(user, profile))
 }
 
 func (h *handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
@@ -60,18 +92,13 @@ func (h *handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	displayName, err := validateDisplayName(update.DisplayName)
+	profile, err := h.profileClient.Update(r.Context(), user.OIDCSub, ProfilePatch{DisplayName: &update.DisplayName})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeProfileClientError(w, err)
 		return
 	}
 
-	updatedUser, err := updateDisplayName(h.db, user.ID, displayName)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, updatedUser)
+	writeJSON(w, meResponseFromProfile(user, profile))
 }
 
 func (h *handler) setUsername(w http.ResponseWriter, r *http.Request) {
@@ -88,14 +115,35 @@ func (h *handler) setUsername(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updatedUser, err := setUserUsername(h.db, user.ID, req.Username)
+	current, err := h.profileClient.GetBySub(r.Context(), user.OIDCSub)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeProfileClientError(w, err)
 		return
 	}
-	writeJSON(w, updatedUser)
+	if current.UsernameSet {
+		http.Error(w, "username has already been set and cannot be changed", http.StatusBadRequest)
+		return
+	}
+
+	profile, err := h.profileClient.Update(r.Context(), user.OIDCSub, ProfilePatch{Username: &req.Username})
+	if err != nil {
+		writeProfileClientError(w, err)
+		return
+	}
+
+	writeJSON(w, meResponseFromProfile(user, profile))
+}
+
+func writeProfileClientError(w http.ResponseWriter, err error) {
+	var invalid *ErrProfileInvalidRequest
+	switch {
+	case errors.Is(err, ErrProfileNotFound):
+		http.Error(w, "not found", http.StatusNotFound)
+	case errors.Is(err, ErrProfileUsernameUsed):
+		http.Error(w, "username is already taken", http.StatusConflict)
+	case errors.As(err, &invalid):
+		http.Error(w, invalid.Message, http.StatusBadRequest)
+	default:
+		http.Error(w, "profile service unavailable", http.StatusBadGateway)
+	}
 }

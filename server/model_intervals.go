@@ -8,7 +8,7 @@ import (
 
 func listIntervals(db *sql.DB, userID int64) ([]Interval, error) {
 	rows, err := db.Query(
-		`SELECT id, name, start_date, end_date, color, position FROM intervals WHERE user_id=? ORDER BY position, id`,
+		`SELECT id, name, start_date, end_date, color, position FROM intervals WHERE user_id=$1 ORDER BY position, id`,
 		userID,
 	)
 	if err != nil {
@@ -48,7 +48,7 @@ func intervalGroupsByID(db *sql.DB, intervalID int64) ([]ShareGroup, error) {
 		`SELECT sg.id, sg.name, sg.public_slug
 		FROM interval_share_groups isg
 		JOIN share_groups sg ON sg.id = isg.share_group_id
-		WHERE isg.interval_id = ?`,
+		WHERE isg.interval_id = $1`,
 		intervalID,
 	)
 	if err != nil {
@@ -85,17 +85,17 @@ func createInterval(db *sql.DB, userID int64, input intervalInput) (Interval, er
 	}
 	defer tx.Rollback()
 
-	res, err := tx.Exec(
-		`INSERT INTO intervals (user_id, name, start_date, end_date, color, position) VALUES (?, ?, ?, ?, ?, ?)`,
+	var id int64
+	err = tx.QueryRow(
+		`INSERT INTO intervals (user_id, name, start_date, end_date, color, position) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
 		userID, input.Name, input.StartDate, input.EndDate, input.Color, position,
-	)
+	).Scan(&id)
 	if err != nil {
 		return Interval{}, err
 	}
-	id, _ := res.LastInsertId()
 
 	for _, groupID := range input.ShareGroupIDs {
-		if _, err := tx.Exec(`INSERT INTO interval_share_groups (interval_id, share_group_id) VALUES (?, ?)`, id, groupID); err != nil {
+		if _, err := tx.Exec(`INSERT INTO interval_share_groups (interval_id, share_group_id) VALUES ($1, $2)`, id, groupID); err != nil {
 			return Interval{}, err
 		}
 	}
@@ -119,7 +119,7 @@ func updateInterval(db *sql.DB, userID, id int64, input intervalInput) error {
 	defer tx.Rollback()
 
 	res, err := tx.Exec(
-		`UPDATE intervals SET name=?, start_date=?, end_date=?, color=? WHERE id=? AND user_id=?`,
+		`UPDATE intervals SET name=$1, start_date=$2, end_date=$3, color=$4 WHERE id=$5 AND user_id=$6`,
 		input.Name, input.StartDate, input.EndDate, input.Color, id, userID,
 	)
 	if err != nil {
@@ -133,11 +133,11 @@ func updateInterval(db *sql.DB, userID, id int64, input intervalInput) error {
 		return ErrNotFound
 	}
 
-	if _, err := tx.Exec(`DELETE FROM interval_share_groups WHERE interval_id=?`, id); err != nil {
+	if _, err := tx.Exec(`DELETE FROM interval_share_groups WHERE interval_id=$1`, id); err != nil {
 		return err
 	}
 	for _, groupID := range input.ShareGroupIDs {
-		if _, err := tx.Exec(`INSERT INTO interval_share_groups (interval_id, share_group_id) VALUES (?, ?)`, id, groupID); err != nil {
+		if _, err := tx.Exec(`INSERT INTO interval_share_groups (interval_id, share_group_id) VALUES ($1, $2)`, id, groupID); err != nil {
 			return err
 		}
 	}
@@ -148,7 +148,7 @@ func updateInterval(db *sql.DB, userID, id int64, input intervalInput) error {
 func intervalByID(db *sql.DB, userID, id int64) (Interval, error) {
 	var iv Interval
 	err := db.QueryRow(
-		`SELECT id, name, start_date, end_date, color, position FROM intervals WHERE id=? AND user_id=?`,
+		`SELECT id, name, start_date, end_date, color, position FROM intervals WHERE id=$1 AND user_id=$2`,
 		id, userID,
 	).Scan(&iv.ID, &iv.Name, &iv.StartDate, &iv.EndDate, &iv.Color, &iv.Position)
 	if err != nil {
@@ -166,7 +166,7 @@ func intervalByID(db *sql.DB, userID, id int64) (Interval, error) {
 }
 
 func deleteInterval(db *sql.DB, userID, id int64) error {
-	res, err := db.Exec(`DELETE FROM intervals WHERE id=? AND user_id=?`, id, userID)
+	res, err := db.Exec(`DELETE FROM intervals WHERE id=$1 AND user_id=$2`, id, userID)
 	if err != nil {
 		return err
 	}
@@ -182,7 +182,7 @@ func deleteInterval(db *sql.DB, userID, id int64) error {
 
 func nextIntervalPosition(db *sql.DB, userID int64) (int, error) {
 	var maxPosition sql.NullInt64
-	if err := db.QueryRow(`SELECT MAX(position) FROM intervals WHERE user_id=?`, userID).Scan(&maxPosition); err != nil {
+	if err := db.QueryRow(`SELECT MAX(position) FROM intervals WHERE user_id=$1`, userID).Scan(&maxPosition); err != nil {
 		return 0, err
 	}
 	if !maxPosition.Valid {
@@ -225,7 +225,7 @@ func normalizeIntervalPositions(db *sql.DB, userID int64) error {
 	}
 	defer tx.Rollback()
 
-	rows, err := tx.Query(`SELECT id FROM intervals WHERE user_id=? ORDER BY position, id`, userID)
+	rows, err := tx.Query(`SELECT id FROM intervals WHERE user_id=$1 ORDER BY position, id`, userID)
 	if err != nil {
 		return err
 	}
@@ -245,7 +245,7 @@ func normalizeIntervalPositions(db *sql.DB, userID int64) error {
 
 	for index, id := range ids {
 		position := index + 1
-		if _, err := tx.Exec(`UPDATE intervals SET position=? WHERE id=? AND user_id=?`, position, id, userID); err != nil {
+		if _, err := tx.Exec(`UPDATE intervals SET position=$1 WHERE id=$2 AND user_id=$3`, position, id, userID); err != nil {
 			return err
 		}
 	}
@@ -265,7 +265,7 @@ func moveInterval(db *sql.DB, userID, id int64, direction string) error {
 	defer tx.Rollback()
 
 	var currentPosition int
-	err = tx.QueryRow(`SELECT position FROM intervals WHERE id=? AND user_id=?`, id, userID).Scan(&currentPosition)
+	err = tx.QueryRow(`SELECT position FROM intervals WHERE id=$1 AND user_id=$2`, id, userID).Scan(&currentPosition)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
@@ -284,7 +284,7 @@ func moveInterval(db *sql.DB, userID, id int64, direction string) error {
 	var neighborPosition int
 	err = tx.QueryRow(
 		`SELECT id, position FROM intervals
-		WHERE user_id=? AND position `+comparator+` ?
+		WHERE user_id=$1 AND position `+comparator+` $2
 		ORDER BY position `+order+`, id `+order+`
 		LIMIT 1`,
 		userID,
@@ -297,10 +297,10 @@ func moveInterval(db *sql.DB, userID, id int64, direction string) error {
 		return err
 	}
 
-	if _, err := tx.Exec(`UPDATE intervals SET position=? WHERE id=? AND user_id=?`, neighborPosition, id, userID); err != nil {
+	if _, err := tx.Exec(`UPDATE intervals SET position=$1 WHERE id=$2 AND user_id=$3`, neighborPosition, id, userID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE intervals SET position=? WHERE id=? AND user_id=?`, currentPosition, neighborID, userID); err != nil {
+	if _, err := tx.Exec(`UPDATE intervals SET position=$1 WHERE id=$2 AND user_id=$3`, currentPosition, neighborID, userID); err != nil {
 		return err
 	}
 

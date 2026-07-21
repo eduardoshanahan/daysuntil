@@ -33,7 +33,12 @@ func (h *handler) createShareGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !user.UsernameSet {
+	profile, err := h.profileClient.GetBySub(r.Context(), user.OIDCSub)
+	if err != nil {
+		writeProfileClientError(w, err)
+		return
+	}
+	if !profile.UsernameSet {
 		http.Error(w, "set a username before creating a share group", http.StatusUnprocessableEntity)
 		return
 	}

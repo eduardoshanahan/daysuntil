@@ -17,7 +17,7 @@
           pkgs.psmisc
           pkgs.iproute2
           pkgs.procps
-          pkgs.sqlite
+          pkgs.postgresql
         ];
       };
     };
