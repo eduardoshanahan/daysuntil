@@ -1,115 +1,37 @@
-name: Build and Push
+name: Build and Deploy
 
 on:
   push:
-    branches: [main, vps]
-    tags: ['*']
+    branches: [main]
+    tags: ["*"]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    env:
-      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-bundle.crt
+  server_build_and_trigger_deploy:
+    if: github.ref == 'refs/heads/main'
+    uses: eduardo/ci-templates/.gitea/workflows/build-and-trigger-deploy.yml@main
+    with:
+      image_name: gitea.mediumsizedrobots.com/eduardo/daysuntil
+      context: server
+      dockerfile: server/Dockerfile
+      platforms: linux/amd64,linux/arm64
+      go_test: true
+      go_test_path: ./...
+      host: rpi-box-01
+      nix_file: rpi-box-01/nixos/daysuntil.nix
+      env_var: DAYSUNTIL_IMAGE
+      health_url: https://daysuntil.mediumsizedrobots.com/api/version
+    secrets: inherit
 
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: network=host
-          buildkitd-config-inline: |
-            [registry."gitea.hhlab.home.arpa"]
-              insecure = true
-
-      - name: Log in to Gitea registry
-        uses: docker/login-action@v3
-        with:
-          registry: gitea.hhlab.home.arpa
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_TOKEN }}
-
-      - name: Compute version
-        id: version
-        run: |
-          BASE=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || echo '')
-          if [ -n "${BASE}" ]; then
-            COUNT=$(git rev-list --count "${BASE}..HEAD")
-          else
-            BASE="v0.0.0"
-            COUNT=$(git rev-list --count HEAD)
-          fi
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            VERSION="${{ github.ref_name }}"
-          elif [ "${COUNT}" = "0" ]; then
-            VERSION="${BASE}"
-          else
-            VERSION="${BASE}.${COUNT}"
-          fi
-          echo "value=${VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: gitea.hhlab.home.arpa/eduardo/daysuntil
-          tags: |
-            type=sha,prefix=,format=long,enable=${{ github.ref_type == 'branch' }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=${{ steps.version.outputs.value }},enable=${{ github.ref == 'refs/heads/vps' }}
-            type=ref,event=tag
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          build-args: |
-            APP_VERSION=${{ steps.version.outputs.value }}
-
-      - name: Deploy to rpi-box-01
-        if: github.ref == 'refs/heads/main'
-        run: |
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > /tmp/deploy_key
-          chmod 600 /tmp/deploy_key
-          ssh -i /tmp/deploy_key \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            eduardo@rpi-box-01.hhlab.home.arpa \
-            "docker pull gitea.hhlab.home.arpa/eduardo/daysuntil:latest && sudo systemctl restart daysuntil"
-          rm -f /tmp/deploy_key
-
-      - name: Deploy to vps-01
-        if: github.ref == 'refs/heads/vps'
-        run: |
-          WORK=$(mktemp -d)
-          trap 'rm -rf "$WORK"' EXIT
-
-          git clone --depth=1 \
-            ssh://git@gitea.hhlab.home.arpa:2222/eduardo/deployments.git \
-            "$WORK"
-
-          sed -i 's|"DAYSUNTIL_IMAGE_TAG=[^"]*"|"DAYSUNTIL_IMAGE_TAG=${{ steps.version.outputs.value }}"|' \
-            "$WORK/vps-01/nixos/daysuntil.nix"
-
-          git -C "$WORK" diff --quiet || {
-            git -C "$WORK" \
-              -c user.name="gitea-runner" \
-              -c user.email="ci@meganix.hhlab.home.arpa" \
-              add vps-01/nixos/daysuntil.nix
-            git -C "$WORK" \
-              -c user.name="gitea-runner" \
-              -c user.email="ci@meganix.hhlab.home.arpa" \
-              commit -m "daysuntil: deploy ${{ steps.version.outputs.value }}"
-            git -C "$WORK" push origin main
-          }
-
-          nixos-rebuild switch \
-            --no-reexec \
-            --flake "$WORK#vps-01" \
-            --target-host eduardo@10.100.0.1 \
-            --elevate=sudo
+  web_build_and_trigger_deploy:
+    if: github.ref == 'refs/heads/main'
+    uses: eduardo/ci-templates/.gitea/workflows/build-and-trigger-deploy.yml@main
+    with:
+      image_name: gitea.mediumsizedrobots.com/eduardo/daysuntil-web
+      context: web
+      dockerfile: web/Dockerfile
+      platforms: linux/amd64,linux/arm64
+      host: rpi-box-01
+      nix_file: rpi-box-01/nixos/daysuntil-web.nix
+      env_var: DAYSUNTIL_WEB_IMAGE
+      health_url: https://daysuntil.mediumsizedrobots.com/
+    secrets: inherit
