@@ -37,7 +37,7 @@ func (h *handler) createInterval(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSONBody(w, r, &input); err != nil {
 		return
 	}
-	groupIDs, err := validateInterval(input, h.db, user.ID)
+	groupIDs, err := validateInterval(&input, h.db, user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -68,7 +68,7 @@ func (h *handler) updateInterval(w http.ResponseWriter, r *http.Request) {
 	if err := decodeJSONBody(w, r, &input); err != nil {
 		return
 	}
-	groupIDs, err := validateInterval(input, h.db, user.ID)
+	groupIDs, err := validateInterval(&input, h.db, user.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

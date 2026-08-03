@@ -1,15 +1,33 @@
 package main
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 type Interval struct {
-	ID          int64        `json:"id"`
-	Name        string       `json:"name"`
-	StartDate   string       `json:"start_date"`
-	EndDate     string       `json:"end_date"`
-	Color       string       `json:"color"`
-	Position    int          `json:"position"`
-	ShareGroups []ShareGroup `json:"share_groups"`
+	ID                 int64        `json:"id"`
+	Name               string       `json:"name"`
+	StartAt            time.Time    `json:"start_at"`
+	EndAt              time.Time    `json:"end_at"`
+	Timezone           string       `json:"timezone"`
+	AllDay             bool         `json:"all_day"`
+	Color              string       `json:"color"`
+	Icon               string       `json:"icon"`
+	BackgroundImageURL string       `json:"background_image_url"`
+	RecurrenceRule     string       `json:"recurrence_rule"`
+	DisplayUnit        string       `json:"display_unit"`
+	Position           int          `json:"position"`
+	ShareGroups        []ShareGroup `json:"share_groups"`
+}
+
+type Reminder struct {
+	ID         int64      `json:"id"`
+	IntervalID int64      `json:"interval_id"`
+	RemindAt   time.Time  `json:"remind_at"`
+	RepeatRule string     `json:"repeat_rule"`
+	Message    string     `json:"message"`
+	SentAt     *time.Time `json:"sent_at,omitempty"`
 }
 
 type ShareGroup struct {

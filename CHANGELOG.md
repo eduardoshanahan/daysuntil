@@ -17,6 +17,12 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - Incremental build number in the version label for non-tagged CI builds
 - Email verification for password registration — when SMTP is configured, new accounts must verify their email before first sign-in; magic link and GitHub OAuth accounts are auto-verified
 - `/help` page with user-facing documentation and screenshots, linked from the header
+- Reminders per interval — one-time or repeating (daily/weekly/monthly/yearly), emailed via the homelab SMTP relay by an in-process dispatcher; the destination address is fetched from profile-service at send time and never stored in daysuntil's own database
+- Recurring intervals (weekly/monthly/yearly) — the current/next occurrence is computed on read, never mutating the original stored dates
+- Icon (emoji) and optional background photo URL per interval
+- Multi-unit countdown display (seconds/minutes/hours/days/weeks/months/years/"sleeps", plus an auto mode), computed client-side; intervals also support an optional specific time-of-day instead of all-day-only
+- Personal access tokens (`/api/tokens`) — bearer-token auth alongside the existing cookie session, so a future native client can authenticate without a browser cookie jar
+- `email` field on profile-service's `Profile`, captured/synced from the OIDC `email` claim on every login
 
 ### Changed
 

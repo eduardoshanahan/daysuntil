@@ -20,12 +20,28 @@ type moveIntervalPayload struct {
 	Direction string `json:"direction"`
 }
 
+type reminderInput struct {
+	RemindAt   string `json:"remind_at"`
+	RepeatRule string `json:"repeat_rule"`
+	Message    string `json:"message"`
+}
+
+type tokenInput struct {
+	Name string `json:"name"`
+}
+
 type intervalInput struct {
-	Name          string  `json:"name"`
-	StartDate     string  `json:"start_date"`
-	EndDate       string  `json:"end_date"`
-	Color         string  `json:"color"`
-	ShareGroupIDs []int64 `json:"share_group_ids"`
+	Name               string  `json:"name"`
+	StartAt            string  `json:"start_at"`
+	EndAt              string  `json:"end_at"`
+	Timezone           string  `json:"timezone"`
+	AllDay             bool    `json:"all_day"`
+	Color              string  `json:"color"`
+	Icon               string  `json:"icon"`
+	BackgroundImageURL string  `json:"background_image_url"`
+	RecurrenceRule     string  `json:"recurrence_rule"`
+	DisplayUnit        string  `json:"display_unit"`
+	ShareGroupIDs      []int64 `json:"share_group_ids"`
 }
 
 type versionResponse struct {

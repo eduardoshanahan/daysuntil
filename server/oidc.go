@@ -52,7 +52,7 @@ func newOIDCRuntime(ctx context.Context, cfg oidcConfig) (*oidcRuntime, error) {
 		ClientID:    cfg.ClientID,
 		RedirectURL: cfg.CallbackURL,
 		Endpoint:    provider.Endpoint(),
-		Scopes:      []string{gooidc.ScopeOpenID, "profile"},
+		Scopes:      []string{gooidc.ScopeOpenID, "profile", "email"},
 	}
 
 	return &oidcRuntime{

@@ -156,13 +156,13 @@ type publicShareGroupRaw struct {
 func publicShareGroupBySlug(db *sql.DB, groupSlug string) (publicShareGroupRaw, error) {
 	var raw publicShareGroupRaw
 	rows, err := db.Query(
-		`SELECT sg.name, sg.public_slug, u.oidc_sub, i.id, i.name, i.start_date, i.end_date, i.color
+		`SELECT sg.name, sg.public_slug, u.oidc_sub, i.id, i.name, i.start_at, i.end_at, i.timezone, i.all_day, i.color, i.icon, i.background_image_url, i.recurrence_rule, i.display_unit
 		FROM interval_share_groups isg
 		JOIN share_groups sg ON sg.id = isg.share_group_id
 		JOIN users u ON u.id = sg.user_id
 		JOIN intervals i ON i.id = isg.interval_id
 		WHERE sg.public_slug=$1
-		ORDER BY i.start_date`,
+		ORDER BY i.start_at`,
 		groupSlug,
 	)
 	if err != nil {
@@ -172,7 +172,7 @@ func publicShareGroupBySlug(db *sql.DB, groupSlug string) (publicShareGroupRaw, 
 
 	for rows.Next() {
 		var iv Interval
-		if err := rows.Scan(&raw.Name, &raw.PublicSlug, &raw.OwnerSub, &iv.ID, &iv.Name, &iv.StartDate, &iv.EndDate, &iv.Color); err != nil {
+		if err := rows.Scan(&raw.Name, &raw.PublicSlug, &raw.OwnerSub, &iv.ID, &iv.Name, &iv.StartAt, &iv.EndAt, &iv.Timezone, &iv.AllDay, &iv.Color, &iv.Icon, &iv.BackgroundImageURL, &iv.RecurrenceRule, &iv.DisplayUnit); err != nil {
 			return publicShareGroupRaw{}, err
 		}
 		raw.Intervals = append(raw.Intervals, iv)

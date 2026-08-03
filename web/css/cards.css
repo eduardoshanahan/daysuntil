@@ -31,6 +31,17 @@
   margin-top: 3rem;
 }
 
+.card.has-background {
+  background-size: cover;
+  background-position: center;
+  color: #fff;
+}
+
+.card.has-background .card-dates,
+.card.has-background .day-label {
+  color: rgba(255, 255, 255, 0.85);
+}
+
 .card {
   --card-color: #4f8ef7;
   background: var(--surface);

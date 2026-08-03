@@ -36,6 +36,7 @@ type Profile struct {
 	LastName    string    `json:"last_name"`
 	DisplayName string    `json:"display_name"`
 	AvatarURL   string    `json:"avatar_url"`
+	Email       string    `json:"email"`
 	UsernameSet bool      `json:"username_set"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -54,7 +55,7 @@ type ProfilePatch struct {
 // Handlers depend on this interface (not the HTTP implementation directly)
 // so tests can substitute an in-memory fake without a live profile-service.
 type ProfileClient interface {
-	FindOrCreate(ctx context.Context, sub, displayNameHint string) (Profile, error)
+	FindOrCreate(ctx context.Context, sub, displayNameHint, email string) (Profile, error)
 	GetBySub(ctx context.Context, sub string) (Profile, error)
 	GetByUsername(ctx context.Context, username string) (Profile, error)
 	Update(ctx context.Context, sub string, patch ProfilePatch) (Profile, error)
@@ -74,11 +75,12 @@ func newHTTPProfileClient(baseURL, token string, httpClient *http.Client) *httpP
 	}
 }
 
-func (c *httpProfileClient) FindOrCreate(ctx context.Context, sub, displayNameHint string) (Profile, error) {
+func (c *httpProfileClient) FindOrCreate(ctx context.Context, sub, displayNameHint, email string) (Profile, error) {
 	body, err := json.Marshal(struct {
 		Sub             string `json:"sub"`
 		DisplayNameHint string `json:"display_name_hint"`
-	}{Sub: sub, DisplayNameHint: displayNameHint})
+		Email           string `json:"email"`
+	}{Sub: sub, DisplayNameHint: displayNameHint, Email: email})
 	if err != nil {
 		return Profile{}, err
 	}

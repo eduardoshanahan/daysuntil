@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -61,6 +62,22 @@ func main() {
 		log.Printf("oidc: configured with issuer %s", oidcCfg.Issuer)
 	} else {
 		log.Printf("oidc: not configured (set OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET)")
+	}
+
+	m := mailerFromEnv()
+	if m.configured() {
+		pollInterval := 5 * time.Minute
+		if raw := strings.TrimSpace(os.Getenv("REMINDER_POLL_INTERVAL")); raw != "" {
+			parsed, err := time.ParseDuration(raw)
+			if err != nil {
+				log.Fatalf("invalid REMINDER_POLL_INTERVAL: %v", err)
+			}
+			pollInterval = parsed
+		}
+		startReminderDispatcher(context.Background(), db, m, h.profileClient, pollInterval)
+		log.Printf("reminders: dispatcher started, polling every %s", pollInterval)
+	} else {
+		log.Printf("reminders: not configured (set SMTP_HOST, SMTP_PORT, SMTP_FROM)")
 	}
 
 	r := newRouter(h, corsOrigins)

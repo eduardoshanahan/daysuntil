@@ -8,7 +8,8 @@ import (
 
 func listIntervals(db *sql.DB, userID int64) ([]Interval, error) {
 	rows, err := db.Query(
-		`SELECT id, name, start_date, end_date, color, position FROM intervals WHERE user_id=$1 ORDER BY position, id`,
+		`SELECT id, name, start_at, end_at, timezone, all_day, color, icon, background_image_url, recurrence_rule, display_unit, position
+		FROM intervals WHERE user_id=$1 ORDER BY position, id`,
 		userID,
 	)
 	if err != nil {
@@ -19,7 +20,7 @@ func listIntervals(db *sql.DB, userID int64) ([]Interval, error) {
 	var intervals []Interval
 	for rows.Next() {
 		var iv Interval
-		if err := rows.Scan(&iv.ID, &iv.Name, &iv.StartDate, &iv.EndDate, &iv.Color, &iv.Position); err != nil {
+		if err := rows.Scan(&iv.ID, &iv.Name, &iv.StartAt, &iv.EndAt, &iv.Timezone, &iv.AllDay, &iv.Color, &iv.Icon, &iv.BackgroundImageURL, &iv.RecurrenceRule, &iv.DisplayUnit, &iv.Position); err != nil {
 			return nil, err
 		}
 		iv.ShareGroups = []ShareGroup{}
@@ -71,9 +72,15 @@ func intervalGroupsByID(db *sql.DB, intervalID int64) ([]ShareGroup, error) {
 }
 
 func createInterval(db *sql.DB, userID int64, input intervalInput) (Interval, error) {
-	if input.Color == "" {
-		input.Color = "#4f8ef7"
+	startAt, err := time.Parse(time.RFC3339, input.StartAt)
+	if err != nil {
+		return Interval{}, err
 	}
+	endAt, err := time.Parse(time.RFC3339, input.EndAt)
+	if err != nil {
+		return Interval{}, err
+	}
+
 	position, err := nextIntervalPosition(db, userID)
 	if err != nil {
 		return Interval{}, err
@@ -87,8 +94,10 @@ func createInterval(db *sql.DB, userID int64, input intervalInput) (Interval, er
 
 	var id int64
 	err = tx.QueryRow(
-		`INSERT INTO intervals (user_id, name, start_date, end_date, color, position) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-		userID, input.Name, input.StartDate, input.EndDate, input.Color, position,
+		`INSERT INTO intervals (user_id, name, start_at, end_at, timezone, all_day, color, icon, background_image_url, recurrence_rule, display_unit, position)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
+		userID, input.Name, startAt, endAt, input.Timezone, input.AllDay, input.Color,
+		input.Icon, input.BackgroundImageURL, input.RecurrenceRule, input.DisplayUnit, position,
 	).Scan(&id)
 	if err != nil {
 		return Interval{}, err
@@ -108,8 +117,13 @@ func createInterval(db *sql.DB, userID int64, input intervalInput) (Interval, er
 }
 
 func updateInterval(db *sql.DB, userID, id int64, input intervalInput) error {
-	if input.Color == "" {
-		input.Color = "#4f8ef7"
+	startAt, err := time.Parse(time.RFC3339, input.StartAt)
+	if err != nil {
+		return err
+	}
+	endAt, err := time.Parse(time.RFC3339, input.EndAt)
+	if err != nil {
+		return err
 	}
 
 	tx, err := db.Begin()
@@ -119,8 +133,11 @@ func updateInterval(db *sql.DB, userID, id int64, input intervalInput) error {
 	defer tx.Rollback()
 
 	res, err := tx.Exec(
-		`UPDATE intervals SET name=$1, start_date=$2, end_date=$3, color=$4 WHERE id=$5 AND user_id=$6`,
-		input.Name, input.StartDate, input.EndDate, input.Color, id, userID,
+		`UPDATE intervals SET name=$1, start_at=$2, end_at=$3, timezone=$4, all_day=$5, color=$6,
+		icon=$7, background_image_url=$8, recurrence_rule=$9, display_unit=$10
+		WHERE id=$11 AND user_id=$12`,
+		input.Name, startAt, endAt, input.Timezone, input.AllDay, input.Color,
+		input.Icon, input.BackgroundImageURL, input.RecurrenceRule, input.DisplayUnit, id, userID,
 	)
 	if err != nil {
 		return err
@@ -148,9 +165,10 @@ func updateInterval(db *sql.DB, userID, id int64, input intervalInput) error {
 func intervalByID(db *sql.DB, userID, id int64) (Interval, error) {
 	var iv Interval
 	err := db.QueryRow(
-		`SELECT id, name, start_date, end_date, color, position FROM intervals WHERE id=$1 AND user_id=$2`,
+		`SELECT id, name, start_at, end_at, timezone, all_day, color, icon, background_image_url, recurrence_rule, display_unit, position
+		FROM intervals WHERE id=$1 AND user_id=$2`,
 		id, userID,
-	).Scan(&iv.ID, &iv.Name, &iv.StartDate, &iv.EndDate, &iv.Color, &iv.Position)
+	).Scan(&iv.ID, &iv.Name, &iv.StartAt, &iv.EndAt, &iv.Timezone, &iv.AllDay, &iv.Color, &iv.Icon, &iv.BackgroundImageURL, &iv.RecurrenceRule, &iv.DisplayUnit, &iv.Position)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Interval{}, ErrNotFound
@@ -305,8 +323,4 @@ func moveInterval(db *sql.DB, userID, id int64, direction string) error {
 	}
 
 	return tx.Commit()
-}
-
-func parseDate(s string) (time.Time, error) {
-	return time.Parse("2006-01-02", s)
 }

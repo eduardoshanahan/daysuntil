@@ -85,6 +85,7 @@ func (h *handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		Sub               string `json:"sub"`
 		Name              string `json:"name"`
 		PreferredUsername string `json:"preferred_username"`
+		Email             string `json:"email"`
 	}
 	if err := idToken.Claims(&claims); err != nil {
 		log.Printf("oidc: claims extraction failed: %v", err)
@@ -104,7 +105,7 @@ func (h *handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := h.profileClient.FindOrCreate(ctx, claims.Sub, displayName); err != nil {
+	if _, err := h.profileClient.FindOrCreate(ctx, claims.Sub, displayName, claims.Email); err != nil {
 		log.Printf("oidc: find/create profile failed: %v", err)
 		http.Redirect(w, r, home+"?auth_error="+url.QueryEscape("Sign-in failed. Please try again."), http.StatusFound)
 		return

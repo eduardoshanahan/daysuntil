@@ -136,7 +136,10 @@
       <form id="interval-form" novalidate>
         <input type="hidden" id="field-id" />
         <label for="field-name">Name</label>
-        <input type="text" id="field-name" placeholder="e.g. Summer vacation" required />
+        <div class="name-icon-row">
+          <input type="text" id="field-icon" maxlength="8" placeholder="🎉" aria-label="Icon (optional emoji)" class="field-icon" />
+          <input type="text" id="field-name" placeholder="e.g. Summer vacation" required />
+        </div>
 
         <label for="field-start">Start date</label>
         <div class="date-input-row">
@@ -149,6 +152,43 @@
           <input type="text" id="field-end" placeholder="YYYY-MM-DD" inputmode="numeric" autocomplete="off" required />
           <button type="button" id="btn-pick-end" class="btn-icon date-picker-trigger" aria-label="Pick end date">Pick</button>
         </div>
+
+        <label class="checkbox-label">
+          <input type="checkbox" id="field-all-day" checked />
+          All day (no specific time)
+        </label>
+
+        <div id="time-fields" class="time-fields hidden">
+          <label for="field-start-time">Start time</label>
+          <input type="time" id="field-start-time" />
+          <label for="field-end-time">End time</label>
+          <input type="time" id="field-end-time" />
+        </div>
+
+        <label for="field-recurrence">Repeats</label>
+        <select id="field-recurrence">
+          <option value="none">Never</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+
+        <label for="field-display-unit">Show countdown in</label>
+        <select id="field-display-unit">
+          <option value="auto">Auto</option>
+          <option value="seconds">Seconds</option>
+          <option value="minutes">Minutes</option>
+          <option value="hours">Hours</option>
+          <option value="days">Days</option>
+          <option value="weeks">Weeks</option>
+          <option value="months">Months</option>
+          <option value="years">Years</option>
+          <option value="sleeps">Sleeps</option>
+        </select>
+
+        <label for="field-background">Background photo URL (optional)</label>
+        <input type="url" id="field-background" placeholder="https://example.com/photo.jpg" />
+        <img id="field-background-preview" class="background-preview hidden" alt="" />
 
         <label for="field-color">Color</label>
         <div class="color-row">
@@ -182,6 +222,25 @@
         <p class="form-help">
           Private intervals stay visible only in your account. Checked groups place this interval on their public page.
         </p>
+
+        <div id="reminders-section" class="reminders-section hidden">
+          <label>Reminders</label>
+          <div id="reminders-list" class="reminders-list"></div>
+          <div class="reminder-add-row">
+            <input type="datetime-local" id="reminder-new-at" aria-label="Reminder date and time" />
+            <select id="reminder-new-repeat" aria-label="Repeat">
+              <option value="none">Once</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+            <input type="text" id="reminder-new-message" maxlength="500" placeholder="Message (optional)" aria-label="Reminder message" />
+            <button type="button" id="reminder-add-btn" class="btn-secondary">Add reminder</button>
+          </div>
+          <p id="reminder-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
+          <p class="form-help">Reminders are emailed to your account address and only available once the interval has been saved.</p>
+        </div>
 
         <p id="form-error" class="form-error hidden" role="alert" aria-live="assertive"></p>
 

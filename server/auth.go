@@ -190,11 +190,28 @@ func authMiddleware(h *handler) func(http.Handler) http.Handler {
 }
 
 func authenticatedUser(db *sql.DB, r *http.Request) (User, error) {
+	if raw := bearerToken(r); raw != "" {
+		return findUserByAPIToken(db, raw)
+	}
+
 	cookie, err := r.Cookie(sessionCookieName)
 	if err != nil {
 		return User{}, ErrNotFound
 	}
 	return findUserBySession(db, cookie.Value)
+}
+
+// bearerToken extracts a token from "Authorization: Bearer <token>" so a
+// native client (mobile app, script) can authenticate without a browser
+// cookie jar. Checked before the session cookie in authenticatedUser, so
+// both paths populate the identical userContextKey downstream.
+func bearerToken(r *http.Request) string {
+	const prefix = "Bearer "
+	h := r.Header.Get("Authorization")
+	if len(h) <= len(prefix) || !strings.EqualFold(h[:len(prefix)], prefix) {
+		return ""
+	}
+	return strings.TrimSpace(h[len(prefix):])
 }
 
 func userFromContext(ctx context.Context) (User, error) {

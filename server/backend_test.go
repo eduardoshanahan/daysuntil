@@ -126,7 +126,7 @@ func createTestUser(t *testing.T, db *sql.DB, profiles *fakeProfileClient, sub, 
 		t.Fatalf("create test user: %v", err)
 	}
 
-	if _, err := profiles.FindOrCreate(ctx, sub, username); err != nil {
+	if _, err := profiles.FindOrCreate(ctx, sub, username, ""); err != nil {
 		t.Fatalf("create test profile: %v", err)
 	}
 
@@ -180,10 +180,10 @@ func TestValidateIntervalRejectsEndDateBeforeStartDate(t *testing.T) {
 		t.Fatalf("init db: %v", err)
 	}
 
-	_, err := validateInterval(intervalInput{
-		Name:      "Test",
-		StartDate: "2026-05-20",
-		EndDate:   "2026-05-19",
+	_, err := validateInterval(&intervalInput{
+		Name:    "Test",
+		StartAt: "2026-05-20T00:00:00Z",
+		EndAt:   "2026-05-19T00:00:00Z",
 	}, db, 1)
 	if err == nil {
 		t.Fatal("expected validation error when end date is before start date")
@@ -196,10 +196,10 @@ func TestValidateIntervalAllowsSameDayRange(t *testing.T) {
 		t.Fatalf("init db: %v", err)
 	}
 
-	_, err := validateInterval(intervalInput{
-		Name:      "Test",
-		StartDate: "2026-05-20",
-		EndDate:   "2026-05-20",
+	_, err := validateInterval(&intervalInput{
+		Name:    "Test",
+		StartAt: "2026-05-20T00:00:00Z",
+		EndAt:   "2026-05-20T00:00:00Z",
 	}, db, 1)
 	if err != nil {
 		t.Fatalf("expected same-day interval to be valid, got %v", err)
@@ -210,8 +210,8 @@ func TestFirstOIDCUserAdoptsLegacyIntervals(t *testing.T) {
 	db, router, profiles := newTestServer(t)
 
 	_, err := db.Exec(
-		`INSERT INTO intervals (name, start_date, end_date, color, user_id) VALUES ($1, $2, $3, $4, NULL)`,
-		"Legacy Trip", "2026-05-20", "2026-05-30", "#4f8ef7",
+		`INSERT INTO intervals (name, start_at, end_at, color, user_id) VALUES ($1, $2, $3, $4, NULL)`,
+		"Legacy Trip", "2026-05-20T00:00:00Z", "2026-05-30T00:00:00Z", "#4f8ef7",
 	)
 	if err != nil {
 		t.Fatalf("insert legacy interval: %v", err)
@@ -329,8 +329,8 @@ func TestUsersOnlySeeTheirOwnIntervals(t *testing.T) {
 
 	createAlice := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 		"name":"Alice Trip",
-		"start_date":"2026-05-20",
-		"end_date":"2026-05-21",
+		"start_at":"2026-05-20T00:00:00Z",
+		"end_at":"2026-05-21T00:00:00Z",
 		"color":"#4f8ef7",
 		"share_group_ids":[]
 	}`, aliceCookie)
@@ -340,8 +340,8 @@ func TestUsersOnlySeeTheirOwnIntervals(t *testing.T) {
 
 	createBob := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 		"name":"Bob Trip",
-		"start_date":"2026-06-20",
-		"end_date":"2026-06-21",
+		"start_at":"2026-06-20T00:00:00Z",
+		"end_at":"2026-06-21T00:00:00Z",
 		"color":"#e05c5c",
 		"share_group_ids":[`+strconv.FormatInt(bobGroup.ID, 10)+`]
 	}`, bobCookie)
@@ -370,8 +370,8 @@ func TestUsersOnlySeeTheirOwnIntervals(t *testing.T) {
 
 	updateBobFromAlice := performRequest(t, router, http.MethodPut, "/api/intervals/2", `{
 		"name":"Stolen",
-		"start_date":"2026-06-20",
-		"end_date":"2026-06-22",
+		"start_at":"2026-06-20T00:00:00Z",
+		"end_at":"2026-06-22T00:00:00Z",
 		"color":"#000000"
 	}`, aliceCookie)
 	if updateBobFromAlice.Code != http.StatusNotFound {
@@ -391,8 +391,8 @@ func TestCreateIntervalRejectsUnknownFields(t *testing.T) {
 
 	rec := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 		"name":"Trip",
-		"start_date":"2026-05-20",
-		"end_date":"2026-05-21",
+		"start_at":"2026-05-20T00:00:00Z",
+		"end_at":"2026-05-21T00:00:00Z",
 		"unexpected":true
 	}`, cookie)
 
@@ -471,8 +471,8 @@ func TestIntervalsCanBeAssignedToShareGroup(t *testing.T) {
 
 	create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 		"name":"Trip",
-		"start_date":"2026-05-20",
-		"end_date":"2026-05-21",
+		"start_at":"2026-05-20T00:00:00Z",
+		"end_at":"2026-05-21T00:00:00Z",
 		"color":"#4f8ef7",
 		"share_group_ids":[`+strconv.FormatInt(group.ID, 10)+`]
 	}`, cookie)
@@ -506,8 +506,8 @@ func TestPublicShareGroupShowsOnlyAssignedIntervals(t *testing.T) {
 
 	privateInterval := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 		"name":"Private Trip",
-		"start_date":"2026-05-20",
-		"end_date":"2026-05-21",
+		"start_at":"2026-05-20T00:00:00Z",
+		"end_at":"2026-05-21T00:00:00Z",
 		"color":"#4f8ef7",
 		"share_group_ids":[]
 	}`, cookie)
@@ -517,8 +517,8 @@ func TestPublicShareGroupShowsOnlyAssignedIntervals(t *testing.T) {
 
 	publicInterval := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 		"name":"Public Trip",
-		"start_date":"2026-06-20",
-		"end_date":"2026-06-21",
+		"start_at":"2026-06-20T00:00:00Z",
+		"end_at":"2026-06-21T00:00:00Z",
 		"color":"#e05c5c",
 		"share_group_ids":[`+strconv.FormatInt(group.ID, 10)+`]
 	}`, cookie)
@@ -567,8 +567,8 @@ func TestDeletingShareGroupMakesItsIntervalsPrivate(t *testing.T) {
 
 	create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 		"name":"Trip",
-		"start_date":"2026-05-20",
-		"end_date":"2026-05-21",
+		"start_at":"2026-05-20T00:00:00Z",
+		"end_at":"2026-05-21T00:00:00Z",
 		"color":"#4f8ef7",
 		"share_group_ids":[`+strconv.FormatInt(group.ID, 10)+`]
 	}`, cookie)
@@ -606,8 +606,8 @@ func TestMoveIntervalReordersList(t *testing.T) {
 	for _, name := range []string{"One", "Two", "Three"} {
 		create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 			"name":"`+name+`",
-			"start_date":"2026-05-20",
-			"end_date":"2026-05-21",
+			"start_at":"2026-05-20T00:00:00Z",
+			"end_at":"2026-05-21T00:00:00Z",
 			"color":"#4f8ef7",
 			"share_group_ids":[]
 		}`, cookie)
@@ -643,8 +643,8 @@ func TestMoveIntervalNormalizesLegacyZeroPositions(t *testing.T) {
 	for _, name := range []string{"First", "Second"} {
 		create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 			"name":"`+name+`",
-			"start_date":"2026-05-20",
-			"end_date":"2026-05-21",
+			"start_at":"2026-05-20T00:00:00Z",
+			"end_at":"2026-05-21T00:00:00Z",
 			"color":"#4f8ef7",
 			"share_group_ids":[]
 		}`, cookie)
@@ -703,8 +703,8 @@ func TestDeleteAccountRemovesUserIntervalsGroupsAndSession(t *testing.T) {
 
 	create := performRequest(t, router, http.MethodPost, "/api/intervals", `{
 		"name":"Trip",
-		"start_date":"2026-05-20",
-		"end_date":"2026-05-21",
+		"start_at":"2026-05-20T00:00:00Z",
+		"end_at":"2026-05-21T00:00:00Z",
 		"color":"#4f8ef7",
 		"share_group_ids":[`+strconv.FormatInt(group.ID, 10)+`]
 	}`, cookie)

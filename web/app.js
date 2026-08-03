@@ -1,6 +1,7 @@
 const { api } = window.DaysUntilApi;
 const {
   computeProgress,
+  formatByUnit,
   formatDate,
   formatISODate,
   isValidISODate,
@@ -44,12 +45,20 @@ const {
   datePickerGrid,
   datePickerTitle,
   datePrev,
+  fieldAllDay,
+  fieldBackground,
+  fieldBackgroundPreview,
   fieldColor,
+  fieldDisplayUnit,
   fieldEnd,
+  fieldEndTime,
+  fieldIcon,
   fieldId,
   fieldName,
+  fieldRecurrence,
   fieldShareGroup,
   fieldStart,
+  fieldStartTime,
   form,
   formError,
   groupsBadge,
@@ -70,6 +79,13 @@ const {
   publicGroupName,
   publicGroupOwner,
   publicGroupSlug,
+  reminderAddBtn,
+  reminderError,
+  reminderNewAt,
+  reminderNewMessage,
+  reminderNewRepeat,
+  remindersList,
+  remindersSection,
   shareGroupCreate,
   shareGroupError,
   shareGroupForm,
@@ -78,6 +94,7 @@ const {
   shareGroupsPanel,
   shareGroupsSummary,
   statusMessage,
+  timeFields,
   userBadge,
 } = window.DaysUntilDom;
 const { escHtml } = window.DaysUntilUtils;
@@ -86,6 +103,8 @@ let isSubmitting = false;
 let isProfileSubmitting = false;
 let isShareGroupSubmitting = false;
 let isUsernameSubmitting = false;
+let isReminderSubmitting = false;
+let currentReminders = [];
 let activeLoadToken = 0;
 const pendingDeleteIds = new Set();
 let lastFocusedElement = null;
@@ -259,15 +278,21 @@ function renderCard(iv, options = {}) {
   card.className = 'card';
   card.dataset.id = iv.id;
 
-  const pastText = progress.status === 'upcoming'
-    ? '0 days past'
-    : `${progress.past} day${progress.past !== 1 ? 's' : ''} past`;
-  const leftText = progress.status === 'ended'
-    ? '0 days left'
-    : `${progress.left} day${progress.left !== 1 ? 's' : ''} left`;
+  // progress.past/left/total are whole days for all-day intervals and
+  // milliseconds for timed ones (see computeProgress in dates.js) — scale
+  // day counts to milliseconds so formatByUnit always receives the same
+  // unit regardless of which branch produced them.
+  const toMs = value => (iv.all_day ? value * 86400000 : value);
+  const pastText = `${formatByUnit(toMs(progress.past), iv.display_unit)} past`;
+  const leftText = `${formatByUnit(toMs(progress.left), iv.display_unit)} left`;
+  const totalText = formatByUnit(toMs(progress.total), iv.display_unit);
 
   const color = iv.color || '#4f8ef7';
   card.style.setProperty('--card-color', color);
+  if (iv.background_image_url) {
+    card.style.backgroundImage = `linear-gradient(rgba(0,0,0,0.35), rgba(0,0,0,0.35)), url("${iv.background_image_url}")`;
+    card.classList.add('has-background');
+  }
 
   const shareBadge = !showShareBadge
     ? ''
@@ -295,11 +320,12 @@ function renderCard(iv, options = {}) {
       </div>`
     : '';
 
+  const iconPrefix = iv.icon ? `${escHtml(iv.icon)} ` : '';
   card.innerHTML = `
     <div class="card-header">
       <div>
-        <div class="card-name">${escHtml(iv.name)} ${shareBadge}<span class="status-badge ${progress.status}">${statusLabel(progress.status, progress)}</span></div>
-        <div class="card-dates">${formatDate(iv.start_date)} &ndash; ${formatDate(iv.end_date)} <span class="total-days">${progress.total} days</span></div>
+        <div class="card-name">${iconPrefix}${escHtml(iv.name)} ${shareBadge}<span class="status-badge ${progress.status}">${statusLabel(progress.status, progress)}</span></div>
+        <div class="card-dates">${formatDate(progress.start)} &ndash; ${formatDate(progress.end)} <span class="total-days">${totalText}</span></div>
       </div>
       ${actions}
     </div>
@@ -511,6 +537,49 @@ function renderPublicGroup(group) {
   });
 }
 
+function updateTimeFieldsVisibility() {
+  timeFields.classList.toggle('hidden', fieldAllDay.checked);
+}
+
+function updateBackgroundPreview() {
+  const url = fieldBackground.value.trim();
+  if (url) {
+    fieldBackgroundPreview.src = url;
+    fieldBackgroundPreview.classList.remove('hidden');
+  } else {
+    fieldBackgroundPreview.src = '';
+    fieldBackgroundPreview.classList.add('hidden');
+  }
+}
+
+function padTime(n) {
+  return `${n}`.padStart(2, '0');
+}
+
+function timeOfDay(date) {
+  return `${padTime(date.getHours())}:${padTime(date.getMinutes())}`;
+}
+
+// combineDateAndTime builds a Date from a YYYY-MM-DD field plus an
+// optional HH:MM field, interpreted in the browser's own local timezone
+// (see openAdd/submit — the interval's stored `timezone` field records
+// that zone name, so an absolute instant and its intended wall-clock
+// reading both stay recoverable).
+function combineDateAndTime(dateStr, timeStr) {
+  const date = parseDate(dateStr);
+  if (!timeStr) return date;
+  const [hh, mm] = timeStr.split(':').map(Number);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), hh, mm, 0);
+}
+
+function browserTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
 function openAdd() {
   lastFocusedElement = document.activeElement;
   modalTitle.textContent = 'Add Interval';
@@ -518,6 +587,10 @@ function openAdd() {
   form.reset();
   fieldColor.value = '#4f8ef7';
   renderShareGroupOptions();
+  updateTimeFieldsVisibility();
+  updateBackgroundPreview();
+  currentReminders = [];
+  remindersSection.classList.add('hidden');
   hideError();
   document.body.classList.add('modal-open');
   overlay.classList.remove('hidden');
@@ -529,10 +602,31 @@ function openEdit(iv) {
   modalTitle.textContent = 'Edit Interval';
   fieldId.value = iv.id;
   fieldName.value = iv.name;
-  fieldStart.value = iv.start_date;
-  fieldEnd.value = iv.end_date;
+  fieldIcon.value = iv.icon || '';
+
+  // Editing reads the stored instant back using the viewer's *current*
+  // local timezone, not necessarily the zone it was originally entered
+  // in — same simplification the previous date-only fields always made
+  // (no per-interval timezone existed before this feature at all).
+  const start = new Date(iv.start_at);
+  const end = new Date(iv.end_at);
+  fieldStart.value = formatISODate(start);
+  fieldEnd.value = formatISODate(end);
+  fieldStartTime.value = timeOfDay(start);
+  fieldEndTime.value = timeOfDay(end);
+  fieldAllDay.checked = iv.all_day !== false;
+
+  fieldRecurrence.value = iv.recurrence_rule || 'none';
+  fieldDisplayUnit.value = iv.display_unit || 'auto';
+  fieldBackground.value = iv.background_image_url || '';
   fieldColor.value = iv.color || '#4f8ef7';
   renderShareGroupOptions(iv.share_groups.map(g => g.id));
+  updateTimeFieldsVisibility();
+  updateBackgroundPreview();
+
+  remindersSection.classList.remove('hidden');
+  loadRemindersForInterval(iv.id);
+
   hideError();
   document.body.classList.add('modal-open');
   overlay.classList.remove('hidden');
@@ -844,6 +938,106 @@ async function removeShareGroup(group) {
   }
 }
 
+function showReminderError(message) {
+  reminderError.textContent = message;
+  reminderError.classList.remove('hidden');
+}
+
+function clearReminderError() {
+  reminderError.textContent = '';
+  reminderError.classList.add('hidden');
+}
+
+function renderReminders() {
+  if (!currentReminders.length) {
+    remindersList.innerHTML = '<p class="empty-msg">No reminders yet.</p>';
+    return;
+  }
+
+  remindersList.innerHTML = '';
+  currentReminders
+    .slice()
+    .sort((a, b) => new Date(a.remind_at) - new Date(b.remind_at))
+    .forEach(reminder => {
+      const row = document.createElement('div');
+      row.className = 'reminder-row';
+      const when = new Date(reminder.remind_at);
+      const repeatText = reminder.repeat_rule !== 'none' ? ` (repeats ${reminder.repeat_rule})` : '';
+      row.innerHTML = `
+        <span class="reminder-when">${formatDate(when)} ${timeOfDay(when)}${repeatText}</span>
+        <span class="reminder-message">${escHtml(reminder.message || '')}</span>
+        <button type="button" class="btn-icon danger btn-reminder-delete" aria-label="Delete reminder">Delete</button>
+      `;
+      row.querySelector('.btn-reminder-delete').addEventListener('click', () => deleteReminderItem(reminder.id));
+      remindersList.appendChild(row);
+    });
+}
+
+async function loadRemindersForInterval(intervalId) {
+  remindersList.innerHTML = '<p class="empty-msg">Loading reminders...</p>';
+  try {
+    currentReminders = await api.listReminders(intervalId);
+    renderReminders();
+  } catch (err) {
+    currentReminders = [];
+    remindersList.innerHTML = '<p class="empty-msg">Unable to load reminders.</p>';
+  }
+}
+
+async function addReminderForCurrentInterval() {
+  if (isReminderSubmitting) return;
+  const intervalId = fieldId.value;
+  if (!intervalId) return;
+
+  clearReminderError();
+  const remindAtLocal = reminderNewAt.value;
+  if (!remindAtLocal) return showReminderError('Pick a date and time for the reminder.');
+
+  const remindAt = new Date(remindAtLocal);
+  const data = {
+    remind_at: remindAt.toISOString(),
+    repeat_rule: reminderNewRepeat.value,
+    message: reminderNewMessage.value.trim(),
+  };
+
+  try {
+    isReminderSubmitting = true;
+    reminderAddBtn.disabled = true;
+    await api.createReminder(intervalId, data);
+    reminderNewAt.value = '';
+    reminderNewMessage.value = '';
+    reminderNewRepeat.value = 'none';
+    await loadRemindersForInterval(intervalId);
+  } catch (err) {
+    if (err.status === 401) {
+      handleUnauthorized('Your session has ended. Log in again.');
+      return;
+    }
+    showReminderError(err.message);
+  } finally {
+    isReminderSubmitting = false;
+    reminderAddBtn.disabled = false;
+  }
+}
+
+async function deleteReminderItem(id) {
+  if (isReminderSubmitting) return;
+  clearReminderError();
+  try {
+    isReminderSubmitting = true;
+    await api.deleteReminder(id);
+    await loadRemindersForInterval(fieldId.value);
+  } catch (err) {
+    if (err.status === 401) {
+      handleUnauthorized('Your session has ended. Log in again.');
+      return;
+    }
+    showReminderError(err.message);
+  } finally {
+    isReminderSubmitting = false;
+  }
+}
+
 btnMenu.addEventListener('click', event => {
   event.stopPropagation();
   const isOpen = !mobileMenu.classList.contains('hidden');
@@ -1138,6 +1332,7 @@ form.addEventListener('submit', async event => {
   const name = fieldName.value.trim();
   const start = fieldStart.value;
   const end = fieldEnd.value;
+  const allDay = fieldAllDay.checked;
   const shareGroupIDs = Array.from(fieldShareGroup.querySelectorAll('input[type=checkbox]:checked')).map(cb => Number(cb.value));
 
   if (!name) return showError('Name is required.');
@@ -1145,9 +1340,24 @@ form.addEventListener('submit', async event => {
   if (!end) return showError('End date is required.');
   if (!isValidISODate(start)) return showError('Start date must be in YYYY-MM-DD format.');
   if (!isValidISODate(end)) return showError('End date must be in YYYY-MM-DD format.');
-  if (start > end) return showError('End date must be on or after start date.');
 
-  const data = { name, start_date: start, end_date: end, color: fieldColor.value, share_group_ids: shareGroupIDs };
+  const startAt = combineDateAndTime(start, allDay ? '' : fieldStartTime.value);
+  const endAt = combineDateAndTime(end, allDay ? '' : fieldEndTime.value);
+  if (endAt < startAt) return showError('End must be on or after start.');
+
+  const data = {
+    name,
+    start_at: startAt.toISOString(),
+    end_at: endAt.toISOString(),
+    timezone: browserTimezone(),
+    all_day: allDay,
+    color: fieldColor.value,
+    icon: fieldIcon.value.trim(),
+    background_image_url: fieldBackground.value.trim(),
+    recurrence_rule: fieldRecurrence.value,
+    display_unit: fieldDisplayUnit.value,
+    share_group_ids: shareGroupIDs,
+  };
 
   try {
     setSubmitting(true);
@@ -1175,6 +1385,10 @@ colorSwatches.addEventListener('click', event => {
   const btn = event.target.closest('.swatch');
   if (btn) fieldColor.value = btn.dataset.color;
 });
+
+fieldAllDay.addEventListener('change', updateTimeFieldsVisibility);
+fieldBackground.addEventListener('input', updateBackgroundPreview);
+reminderAddBtn.addEventListener('click', addReminderForCurrentInterval);
 
 async function initPrivateApp() {
   const signinLink = document.querySelector('.auth-signin-btn');

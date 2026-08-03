@@ -25,11 +25,16 @@ func newFakeProfileClient() *fakeProfileClient {
 	}
 }
 
-func (f *fakeProfileClient) FindOrCreate(ctx context.Context, sub, displayNameHint string) (Profile, error) {
+func (f *fakeProfileClient) FindOrCreate(ctx context.Context, sub, displayNameHint, email string) (Profile, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	if p, ok := f.bySub[sub]; ok {
+		if email != "" && email != p.Email {
+			p.Email = email
+			p.UpdatedAt = time.Now().UTC()
+			f.bySub[sub] = p
+		}
 		return p, nil
 	}
 
@@ -49,6 +54,7 @@ func (f *fakeProfileClient) FindOrCreate(ctx context.Context, sub, displayNameHi
 		OIDCSub:     sub,
 		Username:    placeholder,
 		DisplayName: displayName,
+		Email:       email,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}

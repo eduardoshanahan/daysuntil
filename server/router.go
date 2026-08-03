@@ -40,6 +40,25 @@ func newRouter(h *handler, corsOrigins []string) http.Handler {
 		r.Delete("/{id}", h.deleteInterval)
 	})
 
+	r.Route("/api/intervals/{intervalID}/reminders", func(r chi.Router) {
+		r.Use(authMiddleware(h))
+		r.Get("/", h.listReminders)
+		r.Post("/", h.createReminder)
+	})
+
+	r.Route("/api/reminders/{id}", func(r chi.Router) {
+		r.Use(authMiddleware(h))
+		r.Put("/", h.updateReminder)
+		r.Delete("/", h.deleteReminder)
+	})
+
+	r.Route("/api/tokens", func(r chi.Router) {
+		r.Use(authMiddleware(h))
+		r.Get("/", h.listTokens)
+		r.Post("/", h.createToken)
+		r.Delete("/{id}", h.deleteToken)
+	})
+
 	r.Route("/api/share-groups", func(r chi.Router) {
 		r.Use(authMiddleware(h))
 		r.Get("/", h.listShareGroups)
