@@ -1,0 +1,96 @@
+name: Deploy to vps-01
+
+# Fires automatically on every push to `vps` (a fast-forward of `box` once
+# staging looks good — see docs/runbooks or the CI/CD plan for the
+# promotion command), and stays available via workflow_dispatch as a manual
+# re-deploy path (e.g. re-trigger the current vps SHA with no new commit).
+# Never rebuilds — deploys whichever image is already tagged with the
+# resolved commit SHA, the same one already verified on rpi-box-01.
+
+on:
+  push:
+    branches: [vps]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit SHA to deploy (defaults to the current vps tip if left blank)"
+        type: string
+        required: false
+        default: ""
+
+jobs:
+  deploy-server:
+    runs-on: ci-build
+    steps:
+      - name: Resolve SHA
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.sha }}" ]; then
+            echo "sha=${{ inputs.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to Gitea registry
+        uses: docker/login-action@v3
+        with:
+          registry: gitea.mediumsizedrobots.com
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
+
+      - name: Verify image was actually built
+        # Catches the case where `vps` somehow got a commit that was never
+        # built on `box` (a non-fast-forward push, a failed box build, etc.)
+        # — fail loudly here instead of a confusing container-pull failure
+        # on the Pi/VPS later.
+        run: |
+          IMAGE="gitea.mediumsizedrobots.com/eduardo/daysuntil:${{ steps.resolve.outputs.sha }}"
+          if ! docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "::error::$IMAGE does not exist in the registry — was this SHA actually built on box? (vps should only ever receive a fast-forward push from box)"
+            exit 1
+          fi
+
+      - name: Trigger deploy (server -> vps-01)
+        run: |
+          JSON_PAYLOAD='{"ref":"main","inputs":{"host":"vps-01","nix_file":"vps-01/nixos/daysuntil.nix","env_var":"DAYSUNTIL_IMAGE","image_ref":"gitea.mediumsizedrobots.com/eduardo/daysuntil:${{ steps.resolve.outputs.sha }}","health_url":"https://daysuntil.mesorobots.com/api/version","commit_message":"daysuntil: deploy ${{ steps.resolve.outputs.sha }} to vps-01"}}'
+          curl -sk -f -X POST \
+            -H "Authorization: token ${{ secrets.DISPATCH_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "https://gitea.mediumsizedrobots.com/api/v1/repos/eduardo/ci-templates/actions/workflows/deploy-dispatch.yml/dispatches" \
+            -d "$JSON_PAYLOAD"
+
+  deploy-web:
+    runs-on: ci-build
+    steps:
+      - name: Resolve SHA
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.sha }}" ]; then
+            echo "sha=${{ inputs.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to Gitea registry
+        uses: docker/login-action@v3
+        with:
+          registry: gitea.mediumsizedrobots.com
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
+
+      - name: Verify image was actually built
+        run: |
+          IMAGE="gitea.mediumsizedrobots.com/eduardo/daysuntil-web:${{ steps.resolve.outputs.sha }}"
+          if ! docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "::error::$IMAGE does not exist in the registry — was this SHA actually built on box? (vps should only ever receive a fast-forward push from box)"
+            exit 1
+          fi
+
+      - name: Trigger deploy (web -> vps-01)
+        run: |
+          JSON_PAYLOAD='{"ref":"main","inputs":{"host":"vps-01","nix_file":"vps-01/nixos/daysuntil-web.nix","env_var":"DAYSUNTIL_WEB_IMAGE","image_ref":"gitea.mediumsizedrobots.com/eduardo/daysuntil-web:${{ steps.resolve.outputs.sha }}","health_url":"https://daysuntil.mesorobots.com/","commit_message":"daysuntil-web: deploy ${{ steps.resolve.outputs.sha }} to vps-01"}}'
+          curl -sk -f -X POST \
+            -H "Authorization: token ${{ secrets.DISPATCH_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "https://gitea.mediumsizedrobots.com/api/v1/repos/eduardo/ci-templates/actions/workflows/deploy-dispatch.yml/dispatches" \
+            -d "$JSON_PAYLOAD"

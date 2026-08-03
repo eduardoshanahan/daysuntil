@@ -1,13 +1,13 @@
-name: Build and Deploy
+name: Build and Deploy to staging (box)
 
 on:
   push:
-    branches: [main]
+    branches: [box]
     tags: ["*"]
 
 jobs:
   server_build_and_trigger_deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/box'
     uses: eduardo/ci-templates/.gitea/workflows/build-and-trigger-deploy.yml@main
     with:
       image_name: gitea.mediumsizedrobots.com/eduardo/daysuntil
@@ -23,7 +23,7 @@ jobs:
     secrets: inherit
 
   web_build_and_trigger_deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/box'
     uses: eduardo/ci-templates/.gitea/workflows/build-and-trigger-deploy.yml@main
     with:
       image_name: gitea.mediumsizedrobots.com/eduardo/daysuntil-web

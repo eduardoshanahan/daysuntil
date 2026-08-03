@@ -1,0 +1,29 @@
+name: Test (main)
+
+# main never builds or deploys — see box.yml (staging) and deploy-vps.yml
+# (production). This just runs the server's tests on every push to main for
+# fast feedback. daysuntil/web/ is plain static HTML/JS/CSS (no build step,
+# no package.json) — nothing to check pre-deploy beyond what Docker's own
+# COPY does, so there's no web job here.
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  server_test:
+    runs-on: ci-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        working-directory: server
+        # Mirrors build-and-trigger-deploy.yml's own test step: initdb (used
+        # by tests that spin up a real ephemeral Postgres) refuses to run as
+        # root, so drop to the image's built-in non-root "node" user with an
+        # isolated $HOME.
+        run: |
+          mkdir -p /tmp/citest-home
+          chmod 777 /tmp/citest-home
+          chmod -R a+rX .
+          su node -s /bin/sh -c "cd '$(pwd)' && HOME=/tmp/citest-home GOPATH=/tmp/citest-home/go GOCACHE=/tmp/citest-home/gocache go test ./..."
