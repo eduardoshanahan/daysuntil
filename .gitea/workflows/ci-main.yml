@@ -16,19 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Go test
+        uses: eduardo/ci-templates/.gitea/actions/go-test@main
         with:
-          go-version: "1.23"
-
-      - name: Run tests
-        working-directory: server
-        # Mirrors build-and-trigger-deploy.yml's own test step: initdb (used
-        # by tests that spin up a real ephemeral Postgres) refuses to run as
-        # root, so drop to the image's built-in non-root "node" user with an
-        # isolated $HOME.
-        run: |
-          mkdir -p /tmp/citest-home
-          chmod 777 /tmp/citest-home
-          chmod -R a+rX .
-          su node -s /bin/sh -c "cd '$(pwd)' && HOME=/tmp/citest-home GOPATH=/tmp/citest-home/go GOCACHE=/tmp/citest-home/gocache go test ./..."
+          working-directory: server
