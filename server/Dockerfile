@@ -10,6 +10,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -ldflags="-X main.versi
 
 # Stage 2: run
 FROM alpine:3.20
+RUN apk add --no-cache tzdata
 WORKDIR /app
 COPY --from=builder /app/daysuntil .
 EXPOSE 8080
