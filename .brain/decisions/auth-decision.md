@@ -2,6 +2,10 @@
 
 Date: 2026-05-17
 
+> **Superseded 2026-08-04**: this local `email + password` model was fully
+> removed. Login is now OIDC-only against a self-hosted Zitadel instance —
+> see `auth-oidc-migration.md`. Kept below as historical record only.
+
 ## Decision
 
 The application will move to this account model:

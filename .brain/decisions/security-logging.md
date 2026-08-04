@@ -2,6 +2,13 @@
 
 Date: 2026-05-17
 
+> **Note (2026-08-04)**: login moved to OIDC-only (see
+> `auth-oidc-migration.md`) — there's no password field or GitHub OAuth
+> callback anymore. The rules below still apply, just retarget "OAuth
+> tokens/callback payloads" to the Zitadel OIDC callback and "raw
+> authorization headers" to the bearer-token header now used for API
+> access (`api_tokens`).
+
 This project should keep application logs useful for operations without turning them into a source of sensitive data leakage.
 
 ## Current baseline

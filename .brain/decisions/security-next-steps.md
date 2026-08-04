@@ -2,6 +2,12 @@
 
 Date: 2026-05-17
 
+> **Partially superseded 2026-08-04**: local password auth, magic-link, and
+> GitHub OAuth were all removed in a later migration to OIDC-only login —
+> see `auth-oidc-migration.md`. Item 3 below (password reset / email
+> verification) is now moot; the share-group and logging sections are
+> still current.
+
 This document captures the main security-related follow-up work remaining after the recent hardening pass.
 
 ## Update — 2026-06-04 (public deployment hardening)
@@ -75,10 +81,11 @@ Remaining scope:
 
 - review any future auth/account changes against that rule
 
-### 3. ~~Future password reset / email verification flows~~ — DONE (2026-06-04)
+### 3. ~~Future password reset / email verification flows~~ — MOOT (2026-08-04)
 
-Email verification implemented. Design followed the suggested rules: generic responses,
-no account existence confirmation, email treated as private throughout.
+Local password auth (and the email verification built for it) was removed
+entirely when the app moved to OIDC-only login. There is no password to
+reset and no local credential to verify — see `auth-oidc-migration.md`.
 
 ### 4. Rate limiting across multiple instances
 

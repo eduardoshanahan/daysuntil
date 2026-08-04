@@ -2,6 +2,11 @@
 
 Date: 2026-05-17
 
+> **Superseded 2026-08-04**: this `email + password` model (and everything
+> below) was fully removed in a later migration to OIDC-only login against
+> a self-hosted Zitadel instance — see `auth-oidc-migration.md`. Kept below
+> as historical record only.
+
 ## Goal
 
 Move local authentication from `username + password` to `email + password`, while keeping `username` as the public identity used for profile URLs and sharing.

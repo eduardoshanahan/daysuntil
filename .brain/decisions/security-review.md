@@ -2,6 +2,13 @@
 
 Date: 2026-05-17
 
+> **Partially superseded 2026-08-04**: login moved to OIDC-only (self-hosted
+> Zitadel) — there is no `/api/login`, `/api/register`, local password, or
+> GitHub OAuth anymore, so "Auth endpoint abuse controls" and "Login
+> enumeration through account type" below describe removed code. See
+> `auth-oidc-migration.md`. Everything about share-group slugs, cookie
+> security, HTTP timeouts, and security headers is still current.
+
 This document tracks the current security posture of the `daysuntil` codebase after the recent auth, sharing, and UI changes.
 
 ## Summary
@@ -63,22 +70,20 @@ What remains true:
 
 ### 2. Auth endpoint abuse controls
 
-Status: Fixed
+Status: Removed (2026-08-04) — no longer applicable
 
-What remains true:
-
-- `/api/login` and `/api/register` use per-IP in-memory rate limiting
-- the app returns `429 Too Many Requests` with `Retry-After` when the limit is exceeded
+`/api/login` and `/api/register` don't exist anymore; login is OIDC-only
+against Zitadel, which handles its own abuse controls. The remaining
+in-process rate limiter only guards the public share-group lookup endpoint
+(`authActionPublicLookup` in `rate_limit.go`).
 
 ### 3. Login enumeration through account type
 
-Status: Fixed
+Status: Removed (2026-08-04) — no longer applicable
 
-What remains true:
-
-- local auth uses `email + password`
-- login failures are normalized to `invalid email or password`
-- OAuth-backed accounts do not reveal account type through login responses
+There's only one account type now (OIDC via Zitadel), so there's nothing
+to enumerate between. Local `email + password` login and GitHub OAuth were
+both removed — see `auth-oidc-migration.md`.
 
 ### 4. Username-based public profile enumeration
 
@@ -122,7 +127,7 @@ What remains true:
 - no obvious cross-user authorization bug was found in interval or share-group operations
 - interval assignment validates group ownership before associating an interval with a share group
 - public share-group responses intentionally expose only the shared intervals plus the owner’s public identity fields
-- email is used for local login and is not exposed in current public responses
+- email now lives in profile-service (not locally), fetched only at reminder-send time, and is not exposed in current public responses (see `~/Programming/brain/.brain/investigations/2026-08-03-daysuntil-feature-parity-rollout-*.md`)
 - the local database file is ignored by git and is not tracked in the repository
 
 ## Verification
