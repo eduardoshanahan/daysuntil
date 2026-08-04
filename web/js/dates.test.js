@@ -97,17 +97,25 @@ function loadDates(fixedNow) {
 }
 
 {
+  // untilStart must be a whole-day count (like the all_day branch), not raw
+  // milliseconds -- statusLabel() always appends "day(s)" regardless of
+  // all_day, and app.js's card render calls statusLabel(progress.status,
+  // progress) directly (see web/app.js), so a millisecond value here used
+  // to render as e.g. "starts in 486212934 days" for any interval more
+  // than a few hours out. Caught interactively in a real browser, not by
+  // this suite, because the two functions were previously only ever
+  // tested in isolation.
   const dates = loadDates(new RealDate('2026-05-20T09:00:00Z'));
   const progress = dates.computeProgress({
-    start_at: '2026-05-20T10:00:00Z',
-    end_at: '2026-05-20T14:00:00Z',
+    start_at: '2026-05-23T10:00:00Z',
+    end_at: '2026-05-23T14:00:00Z',
     all_day: false,
     recurrence_rule: 'none',
   });
 
   assert.equal(progress.status, 'upcoming');
-  assert.equal(progress.untilStart, 3600000);
-  assert.equal(dates.formatByUnit(progress.untilStart, 'minutes'), '60 minutes');
+  assert.equal(progress.untilStart, 3);
+  assert.equal(dates.statusLabel(progress.status, progress), 'starts in 3 days');
 }
 
 // --- formatByUnit: auto-unit selection and singular/plural ---

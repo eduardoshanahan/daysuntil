@@ -104,7 +104,7 @@
 
     const totalMs = end - start;
     if (now < start) {
-      return { status: 'upcoming', past: 0, left: totalMs, total: totalMs, untilStart: start - now, pct: 0, start, end };
+      return { status: 'upcoming', past: 0, left: totalMs, total: totalMs, untilStart: diffDays(now, start), pct: 0, start, end };
     }
     if (now > end) {
       return { status: 'ended', past: now - end, left: 0, total: totalMs, untilStart: 0, pct: 100, start, end };
