@@ -29,6 +29,7 @@ jobs:
       image_name: gitea.mediumsizedrobots.com/eduardo/daysuntil-web
       context: web
       dockerfile: web/Dockerfile
+      test_command: "node js/dates.test.js"
       platforms: linux/amd64,linux/arm64
       host: rpi-box-01
       nix_file: rpi-box-01/nixos/daysuntil-web.nix
