@@ -40,7 +40,12 @@ func resolveVersion() string {
 }
 
 func gitVersionInfo(run func(string, ...string) (string, error)) (string, bool) {
-	descOut, descErr := run("git", "describe", "--tags", "--long", "--match", "v[0-9]*.[0-9]*.[0-9]*")
+	// --exclude matters: without it, a malformed 4-segment tag (e.g.
+	// v0.2.0.25, from an earlier tagging mistake) also satisfies --match's
+	// "[0-9]* is digit+wildcard" glob and can be selected as the nearest
+	// tag ahead of a well-formed vX.Y.Z one, corrupting the parsed output
+	// (v0.2.0.25.19 instead of v0.2.0.33). Confirmed live 2026-08-05.
+	descOut, descErr := run("git", "describe", "--tags", "--long", "--match", "v[0-9]*.[0-9]*.[0-9]*", "--exclude", "v[0-9]*.[0-9]*.[0-9]*.[0-9]*")
 	tag := ""
 	if descErr == nil {
 		tag = parseDescribeOutput(strings.TrimSpace(descOut))
