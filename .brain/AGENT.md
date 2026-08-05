@@ -8,8 +8,8 @@ This file extends the global instructions at `~/Programming/brain/.brain/AGENT.m
 
 - **BRAIN_CONTEXT**: dev
 - **BRAIN_REPO**: daysuntil
-- **Purpose**: Days Until — a Go web app for tracking countdowns to future events
-- **Repo**: public, pushed to Gitea (`gitea.hhlab.home.arpa/eduardo/daysuntil`) + GitHub (`eduardoshanahan/daysuntil`)
+- **Purpose**: Days Until — a Go API for tracking countdowns to future events. The web UI lives in the sibling `daysuntil-web` repo (split out 2026-08-05; see `~/Programming/brain/.brain/decisions/2026-08-05-daysuntil-repo-split.md`) — this repo is server-only.
+- **Repo**: public, pushed to Gitea (`gitea.mediumsizedrobots.com/eduardo/daysuntil`) + GitHub (`eduardoshanahan/daysuntil`)
 
 ---
 
@@ -22,12 +22,11 @@ This file extends the global instructions at `~/Programming/brain/.brain/AGENT.m
 
 ## Deployment
 
-- **rpi-box-01** (homelab): CI deploys on `main` branch push — builds multi-arch image, SSHs to pull + restart
-- **vps-01** (public): CI deploys on `vps` branch push — bumps SHA in `deployments/vps-01/nixos/daysuntil.nix`, commits, runs `nixos-rebuild switch --target-host vps-01`
-- Compose template: `~/Programming/docker-services/daysuntil/docker-compose.yml`
-- Host config: `~/Programming/deployments/{rpi-box-01,vps-01}/nixos/daysuntil.nix`
+- Branch-based: `main` (test-only) / `box` (build + deploy to rpi-box-01) / `vps` (deploy-only, promoted via `git push origin origin/box:refs/heads/vps`) — see `~/Programming/brain/docs/projects.md`
+- Matching worktrees: `~/Programming/daysuntil-box`, `~/Programming/daysuntil-vps`
+- Host config: `~/Programming/deployments/{rpi-box-01,vps-01}/nixos/daysuntil.nix`, env var `DAYSUNTIL_IMAGE`
 
 ## Repo-Specific Rules
 
-- Always check which branch you are on before committing — `main` and `vps` diverge; committing to the wrong one means redoing the work
-- Frontend and backend changes that alter API shape must be committed and deployed together
+- Always check which branch/worktree you are on before committing — `main`, `box`, `vps` diverge; committing to the wrong one means redoing the work
+- API changes that alter the HTTP contract must be coordinated with `daysuntil-web` (no shared types between the repos to catch drift automatically)

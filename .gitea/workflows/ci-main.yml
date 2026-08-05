@@ -1,11 +1,9 @@
 name: Test (main)
 
-# main never builds or deploys — see box.yml (staging) and deploy-vps.yml
-# (production). Runs the server's Go tests and the web layer's JS tests
-# (dates.js's date/recurrence math, in web/js/dates.test.js) on every push
-# to main for fast feedback. web/ still has no build step or package.json
-# (plain static HTML/JS/CSS) -- dates.test.js runs directly via node, no
-# npm involved.
+# main never builds or deploys — see ci.yml (staging) and deploy-vps.yml
+# (production). Runs the server's Go tests on every push to main for fast
+# feedback. Web UI tests live in the daysuntil-web repo since the web/
+# split into its own repo on 2026-08-05.
 
 on:
   push:
@@ -21,12 +19,3 @@ jobs:
         uses: https://gitea.mediumsizedrobots.com/eduardo/ci-templates/.gitea/actions/go-test@main
         with:
           working-directory: server
-
-  web_test:
-    runs-on: ci-build
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run tests
-        working-directory: web
-        run: node js/dates.test.js
