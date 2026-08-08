@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+// apiTokenTTL bounds a personal access token's blast radius if it leaks —
+// long enough not to be annoying for genuine automation use, short enough
+// to force periodic rotation. Tokens have no renewal path; a caller that
+// still needs access after expiry creates a new one.
+const apiTokenTTL = 365 * 24 * time.Hour
+
 // APIToken is the client-facing view of a personal access token — never
 // includes the hash, and the raw token itself is only ever returned once,
 // at creation, by createAPIToken.
@@ -54,11 +60,13 @@ func createAPIToken(db *sql.DB, userID int64, name string) (string, APIToken, er
 	}
 	tokenHash := hashToken(rawToken)
 
+	expiresAt := time.Now().UTC().Add(apiTokenTTL)
+
 	var t APIToken
 	err = db.QueryRow(
-		`INSERT INTO api_tokens (user_id, token_hash, name) VALUES ($1, $2, $3)
+		`INSERT INTO api_tokens (user_id, token_hash, name, expires_at) VALUES ($1, $2, $3, $4)
 		RETURNING id, name, created_at, last_used_at, expires_at`,
-		userID, tokenHash, name,
+		userID, tokenHash, name, expiresAt,
 	).Scan(&t.ID, &t.Name, &t.CreatedAt, &t.LastUsedAt, &t.ExpiresAt)
 	if err != nil {
 		return "", APIToken{}, err

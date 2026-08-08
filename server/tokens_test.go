@@ -2,11 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func performBearerRequest(t *testing.T, h http.Handler, method, path, body, token string) *httptest.ResponseRecorder {
@@ -85,5 +87,52 @@ func TestBearerAuthRejectsUnknownToken(t *testing.T) {
 	rec := performBearerRequest(t, router, http.MethodGet, "/api/me", "", "not-a-real-token")
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for an unknown bearer token, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateAPITokenSetsAFiniteExpiryByDefault(t *testing.T) {
+	db := openTestDB(t)
+	if err := initDB(db); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+	user, err := findOrCreateLocalUser(db, "sub-token-expiry")
+	if err != nil {
+		t.Fatalf("findOrCreateLocalUser: %v", err)
+	}
+
+	_, token, err := createAPIToken(db, user.ID, "cli")
+	if err != nil {
+		t.Fatalf("createAPIToken: %v", err)
+	}
+
+	if token.ExpiresAt == nil {
+		t.Fatal("expected a newly created token to have a non-nil expires_at")
+	}
+	wantExpiry := time.Now().UTC().Add(apiTokenTTL)
+	if diff := wantExpiry.Sub(*token.ExpiresAt); diff < -time.Minute || diff > time.Minute {
+		t.Fatalf("expected expires_at ~%s from now (apiTokenTTL), got %s (diff %s)", apiTokenTTL, token.ExpiresAt, diff)
+	}
+}
+
+func TestExpiredAPITokenIsRejected(t *testing.T) {
+	db := openTestDB(t)
+	if err := initDB(db); err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+	user, err := findOrCreateLocalUser(db, "sub-token-expired")
+	if err != nil {
+		t.Fatalf("findOrCreateLocalUser: %v", err)
+	}
+
+	rawToken, token, err := createAPIToken(db, user.ID, "cli")
+	if err != nil {
+		t.Fatalf("createAPIToken: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE api_tokens SET expires_at=$1 WHERE id=$2`, time.Now().UTC().Add(-time.Hour), token.ID); err != nil {
+		t.Fatalf("force-expire token: %v", err)
+	}
+
+	if _, err := findUserByAPIToken(db, rawToken); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for an expired token, got %v", err)
 	}
 }
