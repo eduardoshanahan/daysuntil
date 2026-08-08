@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-var shareGroupSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+){3}$`)
+var shareGroupSlugPattern = regexp.MustCompile(`^[a-z0-9]+$`)
 
 // openTestDB creates a fresh, uniquely-named database on the shared
 // ephemeral test Postgres cluster (see TestMain in testmain_test.go) and
@@ -166,14 +166,10 @@ func createShareGroupForTest(t *testing.T, router http.Handler, cookie *http.Coo
 func assertShareGroupSlug(t *testing.T, slug string) {
 	t.Helper()
 	if !shareGroupSlugPattern.MatchString(slug) {
-		t.Fatalf("expected share group slug to have three readable parts and one suffix, got %q", slug)
+		t.Fatalf("expected an opaque lowercase-base36 share group slug, got %q", slug)
 	}
-	parts := strings.Split(slug, "-")
-	if len(parts) != 4 {
-		t.Fatalf("expected 4 slug parts, got %d in %q", len(parts), slug)
-	}
-	if len(parts[3]) != shareGroupSlugSuffixLength {
-		t.Fatalf("expected suffix length %d, got %d in %q", shareGroupSlugSuffixLength, len(parts[3]), slug)
+	if len(slug) != shareGroupSlugLength {
+		t.Fatalf("expected slug length %d, got %d in %q", shareGroupSlugLength, len(slug), slug)
 	}
 }
 

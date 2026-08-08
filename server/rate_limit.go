@@ -146,14 +146,22 @@ func authRateLimitMiddleware(limiter *authRateLimiter, action string) func(http.
 	}
 }
 
+// clientIPFromRequest extracts the IP to key rate limiting on. daysuntil
+// is only ever reachable through Traefik (the container has no published
+// host port, only `expose`) — every real request's RemoteAddr is Traefik's
+// own container IP, not the real client, which is why X-Forwarded-For is
+// needed at all. But X-Forwarded-For is a request header: everything in it
+// except the last entry is client-supplied and can be forged arbitrarily —
+// Traefik appends the real connecting IP as the last entry on every
+// request, it does not strip or trust whatever the client already put
+// there. Reading the first entry (as this used to) let any caller defeat
+// rate limiting entirely by rotating a fake value per request; only the
+// last entry — the one Traefik itself added — is trustworthy.
 func clientIPFromRequest(r *http.Request) string {
 	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
-		ip := xff
-		if idx := strings.IndexByte(xff, ','); idx != -1 {
-			ip = strings.TrimSpace(xff[:idx])
-		}
-		if ip != "" {
-			return ip
+		parts := strings.Split(xff, ",")
+		if last := strings.TrimSpace(parts[len(parts)-1]); last != "" {
+			return last
 		}
 	}
 

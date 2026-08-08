@@ -6,54 +6,19 @@ import (
 	"strings"
 )
 
-const shareGroupSlugSuffixLength = 5
-
-var publicSlugWords = []string{
-	"amber", "apple", "atlas", "autumn", "basil", "beacon", "berry", "birch",
-	"blossom", "breeze", "brook", "canyon", "cedar", "cloud", "clover", "copper",
-	"coral", "cove", "cricket", "daisy", "dawn", "delta", "dune", "ember",
-	"fern", "field", "finch", "fjord", "forest", "garden", "glade", "grove",
-	"harbor", "hazel", "heather", "hollow", "honey", "island", "ivy", "juniper",
-	"lagoon", "laurel", "leaf", "lilac", "linen", "lotus", "maple", "marsh",
-	"meadow", "mercury", "mint", "mist", "monarch", "morning", "moss", "nectar",
-	"oasis", "olive", "orchid", "otter", "pebble", "pine", "prairie", "quartz",
-	"rain", "raven", "reef", "ripple", "river", "robin", "rose", "sage",
-	"shadow", "shore", "silver", "sky", "solstice", "sparrow", "spring", "star",
-	"stone", "stream", "summer", "sunset", "thistle", "timber", "trill", "valley",
-	"velvet", "violet", "willow", "winter", "wren",
-}
-
-func randomReadableSlug() (string, error) {
-	parts := make([]string, 3)
-	for i := range parts {
-		word, err := randomSlugWord()
-		if err != nil {
-			return "", err
-		}
-		parts[i] = word
-	}
-	return strings.Join(parts, "-"), nil
-}
+// shareGroupSlugLength is chosen for >=128 bits of entropy: log2(36) per
+// char * 26 chars ≈ 134.4 bits. Public share group pages are
+// private-by-link (X-Robots-Tag: noindex, and can contain personal
+// countdown data an owner doesn't want guessable) — the slug is the only
+// access control, so it has to resist online brute-force, not just be
+// unlisted. The previous scheme (3 readable words + a 5-char suffix) was
+// ~46 bits, guessable at scale; opaque and high-entropy replaces it
+// entirely rather than appending to it, since a long random suffix already
+// defeats the readable words' only purpose (memorability).
+const shareGroupSlugLength = 26
 
 func randomShareGroupSlug() (string, error) {
-	readable, err := randomReadableSlug()
-	if err != nil {
-		return "", err
-	}
-	suffix, err := randomBase36String(shareGroupSlugSuffixLength)
-	if err != nil {
-		return "", err
-	}
-	return readable + "-" + suffix, nil
-}
-
-func randomSlugWord() (string, error) {
-	max := big.NewInt(int64(len(publicSlugWords)))
-	n, err := crand.Int(crand.Reader, max)
-	if err != nil {
-		return "", err
-	}
-	return publicSlugWords[n.Int64()], nil
+	return randomBase36String(shareGroupSlugLength)
 }
 
 func randomBase36String(length int) (string, error) {
