@@ -10,6 +10,7 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"golang.org/x/oauth2"
 )
 
 func main() {
@@ -43,18 +44,21 @@ func main() {
 		log.Fatalf("init db: %v", err)
 	}
 
+	outboundClient := &http.Client{Timeout: outboundHTTPTimeout}
+
 	h := &handler{
 		db:            db,
 		cookieSecure:  cookieSecure,
 		webOrigin:     webOrigin,
 		oidc:          oidcCfg,
-		httpClient:    http.DefaultClient,
+		httpClient:    outboundClient,
 		authLimiter:   newAuthRateLimiter(db),
-		profileClient: newHTTPProfileClient(profileServiceURL, profileServiceToken, http.DefaultClient),
+		profileClient: newHTTPProfileClient(profileServiceURL, profileServiceToken, outboundClient),
 	}
 
 	if oidcCfg.Enabled() {
-		rt, err := newOIDCRuntime(context.Background(), oidcCfg)
+		oidcCtx := context.WithValue(context.Background(), oauth2.HTTPClient, outboundClient)
+		rt, err := newOIDCRuntime(oidcCtx, oidcCfg)
 		if err != nil {
 			log.Fatalf("oidc init: %v", err)
 		}

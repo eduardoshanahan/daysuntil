@@ -25,13 +25,14 @@ func newFakeProfileClient() *fakeProfileClient {
 	}
 }
 
-func (f *fakeProfileClient) FindOrCreate(ctx context.Context, sub, displayNameHint, email string) (Profile, error) {
+func (f *fakeProfileClient) FindOrCreate(ctx context.Context, sub, displayNameHint, email string, emailVerified bool) (Profile, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	if p, ok := f.bySub[sub]; ok {
-		if email != "" && email != p.Email {
+		if email != "" && (email != p.Email || emailVerified != p.EmailVerified) {
 			p.Email = email
+			p.EmailVerified = emailVerified
 			p.UpdatedAt = time.Now().UTC()
 			f.bySub[sub] = p
 		}
@@ -50,13 +51,14 @@ func (f *fakeProfileClient) FindOrCreate(ctx context.Context, sub, displayNameHi
 	f.nextID++
 	now := time.Now().UTC()
 	p := Profile{
-		ID:          f.nextID,
-		OIDCSub:     sub,
-		Username:    placeholder,
-		DisplayName: displayName,
-		Email:       email,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:            f.nextID,
+		OIDCSub:       sub,
+		Username:      placeholder,
+		DisplayName:   displayName,
+		Email:         email,
+		EmailVerified: emailVerified,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 	f.bySub[sub] = p
 	f.byName[placeholder] = sub

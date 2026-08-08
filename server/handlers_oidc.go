@@ -59,7 +59,10 @@ func (h *handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	// h.httpClient carries an explicit timeout — without it, the
+	// oauth2/go-oidc libraries fall back to http.DefaultClient (no
+	// timeout at all) for the token exchange and any JWKS fetch below.
+	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, h.httpClient)
 	token, err := h.oidcRT.oauth2Cfg.Exchange(ctx, code, oauth2.VerifierOption(pkceCookie.Value))
 	if err != nil {
 		log.Printf("oidc: code exchange failed: %v", err)
@@ -86,6 +89,7 @@ func (h *handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		Name              string `json:"name"`
 		PreferredUsername string `json:"preferred_username"`
 		Email             string `json:"email"`
+		EmailVerified     bool   `json:"email_verified"`
 	}
 	if err := idToken.Claims(&claims); err != nil {
 		log.Printf("oidc: claims extraction failed: %v", err)
@@ -105,7 +109,7 @@ func (h *handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := h.profileClient.FindOrCreate(ctx, claims.Sub, displayName, claims.Email); err != nil {
+	if _, err := h.profileClient.FindOrCreate(ctx, claims.Sub, displayName, claims.Email, claims.EmailVerified); err != nil {
 		log.Printf("oidc: find/create profile failed: %v", err)
 		http.Redirect(w, r, home+"?auth_error="+url.QueryEscape("Sign-in failed. Please try again."), http.StatusFound)
 		return

@@ -54,6 +54,13 @@ func dispatchDueReminders(ctx context.Context, db *sql.DB, m mailSender, profile
 			log.Printf("reminder %d: owner has no email on file, skipping", d.ID)
 			continue
 		}
+		if !profile.EmailVerified {
+			// The IdP hasn't confirmed this address belongs to the user —
+			// could be a typo, or someone else's address entered before
+			// verification completes. Never email an unverified address.
+			log.Printf("reminder %d: owner's email is unverified, skipping", d.ID)
+			continue
+		}
 
 		subject := "Reminder: " + d.IntervalName
 		body := d.Message

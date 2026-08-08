@@ -129,7 +129,7 @@ func createTestUser(t *testing.T, db *sql.DB, profiles *fakeProfileClient, sub, 
 		t.Fatalf("create test user: %v", err)
 	}
 
-	if _, err := profiles.FindOrCreate(ctx, sub, username, ""); err != nil {
+	if _, err := profiles.FindOrCreate(ctx, sub, username, "", false); err != nil {
 		t.Fatalf("create test profile: %v", err)
 	}
 

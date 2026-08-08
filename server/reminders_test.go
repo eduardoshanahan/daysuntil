@@ -132,7 +132,7 @@ func TestDispatchDueRemindersSendsAndMarksSentForOneTimeReminder(t *testing.T) {
 	ctx := context.Background()
 
 	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
-	if _, err := profiles.FindOrCreate(ctx, "sub-alice-001", "alice", "alice@example.com"); err != nil {
+	if _, err := profiles.FindOrCreate(ctx, "sub-alice-001", "alice", "alice@example.com", true); err != nil {
 		t.Fatalf("set test email: %v", err)
 	}
 	interval := createIntervalForTest(t, router, cookie, "Trip")
@@ -182,7 +182,7 @@ func TestDispatchDueRemindersAdvancesRecurringReminder(t *testing.T) {
 	ctx := context.Background()
 
 	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
-	if _, err := profiles.FindOrCreate(ctx, "sub-alice-001", "alice", "alice@example.com"); err != nil {
+	if _, err := profiles.FindOrCreate(ctx, "sub-alice-001", "alice", "alice@example.com", true); err != nil {
 		t.Fatalf("set test email: %v", err)
 	}
 	interval := createIntervalForTest(t, router, cookie, "Birthday")
@@ -232,5 +232,31 @@ func TestDispatchDueRemindersSkipsOwnerWithNoEmail(t *testing.T) {
 	}
 	if len(fm.sent) != 0 {
 		t.Fatalf("expected no email sent when owner has no email on file, got %d", len(fm.sent))
+	}
+}
+
+func TestDispatchDueRemindersSkipsOwnerWithUnverifiedEmail(t *testing.T) {
+	db, router, profiles := newTestServer(t)
+	ctx := context.Background()
+
+	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
+	// An email is on file, but the IdP has not confirmed it belongs to
+	// this user — must not be trusted as a reminder destination.
+	if _, err := profiles.FindOrCreate(ctx, "sub-alice-001", "alice", "unverified@example.com", false); err != nil {
+		t.Fatalf("set test email: %v", err)
+	}
+	interval := createIntervalForTest(t, router, cookie, "Trip")
+
+	performRequest(t, router, http.MethodPost, "/api/intervals/"+strconv.FormatInt(interval.ID, 10)+"/reminders", `{
+		"remind_at":"2020-01-01T00:00:00Z",
+		"repeat_rule":"none"
+	}`, cookie)
+
+	fm := &fakeMailer{}
+	if err := dispatchDueReminders(ctx, db, fm, profiles); err != nil {
+		t.Fatalf("dispatch due reminders: %v", err)
+	}
+	if len(fm.sent) != 0 {
+		t.Fatalf("expected no email sent when the owner's email is unverified, got %d: %#v", len(fm.sent), fm.sent)
 	}
 }

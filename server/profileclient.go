@@ -29,17 +29,18 @@ func (e *ErrProfileInvalidRequest) Error() string { return e.Message }
 
 // Profile mirrors profile-service's response shape.
 type Profile struct {
-	ID          int64     `json:"id"`
-	OIDCSub     string    `json:"oidc_sub"`
-	Username    string    `json:"username"`
-	FirstName   string    `json:"first_name"`
-	LastName    string    `json:"last_name"`
-	DisplayName string    `json:"display_name"`
-	AvatarURL   string    `json:"avatar_url"`
-	Email       string    `json:"email"`
-	UsernameSet bool      `json:"username_set"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID            int64     `json:"id"`
+	OIDCSub       string    `json:"oidc_sub"`
+	Username      string    `json:"username"`
+	FirstName     string    `json:"first_name"`
+	LastName      string    `json:"last_name"`
+	DisplayName   string    `json:"display_name"`
+	AvatarURL     string    `json:"avatar_url"`
+	Email         string    `json:"email"`
+	EmailVerified bool      `json:"email_verified"`
+	UsernameSet   bool      `json:"username_set"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // ProfilePatch mirrors profile-service's partial-update request body.
@@ -66,7 +67,7 @@ type PublicProfile struct {
 // Handlers depend on this interface (not the HTTP implementation directly)
 // so tests can substitute an in-memory fake without a live profile-service.
 type ProfileClient interface {
-	FindOrCreate(ctx context.Context, sub, displayNameHint, email string) (Profile, error)
+	FindOrCreate(ctx context.Context, sub, displayNameHint, email string, emailVerified bool) (Profile, error)
 	GetBySub(ctx context.Context, sub string) (Profile, error)
 	GetByUsername(ctx context.Context, username string) (Profile, error)
 	GetPublicBySub(ctx context.Context, sub string) (PublicProfile, error)
@@ -87,12 +88,13 @@ func newHTTPProfileClient(baseURL, token string, httpClient *http.Client) *httpP
 	}
 }
 
-func (c *httpProfileClient) FindOrCreate(ctx context.Context, sub, displayNameHint, email string) (Profile, error) {
+func (c *httpProfileClient) FindOrCreate(ctx context.Context, sub, displayNameHint, email string, emailVerified bool) (Profile, error) {
 	body, err := json.Marshal(struct {
 		Sub             string `json:"sub"`
 		DisplayNameHint string `json:"display_name_hint"`
 		Email           string `json:"email"`
-	}{Sub: sub, DisplayNameHint: displayNameHint, Email: email})
+		EmailVerified   bool   `json:"email_verified"`
+	}{Sub: sub, DisplayNameHint: displayNameHint, Email: email, EmailVerified: emailVerified})
 	if err != nil {
 		return Profile{}, err
 	}
