@@ -26,7 +26,7 @@ func (h *handler) publicShareGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	owner, err := h.profileClient.GetBySub(r.Context(), raw.OwnerSub)
+	owner, err := h.profileClient.GetPublicBySub(r.Context(), raw.OwnerSub)
 	if err != nil {
 		log.Printf("public share group: resolve owner profile failed: %v", err)
 		http.Error(w, "failed to load share group", http.StatusInternalServerError)

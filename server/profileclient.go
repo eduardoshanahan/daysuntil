@@ -51,6 +51,17 @@ type ProfilePatch struct {
 	AvatarURL   *string `json:"avatar_url,omitempty"`
 }
 
+// PublicProfile is the always-public projection profile-service's
+// read:public operation returns for an arbitrary sub — never email or the
+// personal-name fields. Used for resolving another user's identity for
+// display (e.g. a public share group's owner), as opposed to GetBySub's
+// full profile, which is only ever called with the caller's own
+// authenticated sub.
+type PublicProfile struct {
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+}
+
 // ProfileClient is the boundary daysuntil uses to reach profile-service.
 // Handlers depend on this interface (not the HTTP implementation directly)
 // so tests can substitute an in-memory fake without a live profile-service.
@@ -58,6 +69,7 @@ type ProfileClient interface {
 	FindOrCreate(ctx context.Context, sub, displayNameHint, email string) (Profile, error)
 	GetBySub(ctx context.Context, sub string) (Profile, error)
 	GetByUsername(ctx context.Context, username string) (Profile, error)
+	GetPublicBySub(ctx context.Context, sub string) (PublicProfile, error)
 	Update(ctx context.Context, sub string, patch ProfilePatch) (Profile, error)
 }
 
@@ -93,6 +105,33 @@ func (c *httpProfileClient) GetBySub(ctx context.Context, sub string) (Profile, 
 
 func (c *httpProfileClient) GetByUsername(ctx context.Context, username string) (Profile, error) {
 	return c.do(ctx, http.MethodGet, "/internal/profiles/by-username/"+url.PathEscape(username), nil)
+}
+
+func (c *httpProfileClient) GetPublicBySub(ctx context.Context, sub string) (PublicProfile, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/internal/profiles/public/by-sub/"+url.PathEscape(sub), nil)
+	if err != nil {
+		return PublicProfile{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return PublicProfile{}, fmt.Errorf("profile-service request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var p PublicProfile
+		if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
+			return PublicProfile{}, fmt.Errorf("decode profile-service response: %w", err)
+		}
+		return p, nil
+	case http.StatusNotFound:
+		return PublicProfile{}, ErrProfileNotFound
+	default:
+		return PublicProfile{}, fmt.Errorf("profile-service returned unexpected status %d", resp.StatusCode)
+	}
 }
 
 func (c *httpProfileClient) Update(ctx context.Context, sub string, patch ProfilePatch) (Profile, error) {

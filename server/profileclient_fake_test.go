@@ -85,6 +85,17 @@ func (f *fakeProfileClient) GetByUsername(ctx context.Context, username string) 
 	return f.bySub[sub], nil
 }
 
+func (f *fakeProfileClient) GetPublicBySub(ctx context.Context, sub string) (PublicProfile, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	p, ok := f.bySub[sub]
+	if !ok {
+		return PublicProfile{}, ErrProfileNotFound
+	}
+	return PublicProfile{Username: p.Username, DisplayName: p.DisplayName}, nil
+}
+
 func (f *fakeProfileClient) Update(ctx context.Context, sub string, patch ProfilePatch) (Profile, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
