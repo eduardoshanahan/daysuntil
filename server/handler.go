@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 )
 
@@ -68,12 +69,35 @@ func (h *handler) homeURL() string {
 
 func (h *handler) crossOrigin() bool { return h.webOrigin != "" }
 
+// expectedOrigin is the Origin header value a legitimate, cookie-authenticated
+// unsafe request must carry. In the split web/API deployment (WEB_ORIGIN
+// set), that's the configured web frontend's origin, since the API's own
+// host is never where requests originate. Otherwise the API is same-origin
+// with its own frontend, so the request's own Host (with the scheme implied
+// by cookieSecure) is the expected origin.
+func (h *handler) expectedOrigin(r *http.Request) string {
+	if h.webOrigin != "" {
+		return h.webOrigin
+	}
+	scheme := "http"
+	if h.cookieSecure {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
+}
+
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
 }
 
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+		return errors.New("unexpected content type")
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	dec := json.NewDecoder(r.Body)

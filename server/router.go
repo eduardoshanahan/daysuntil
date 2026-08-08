@@ -15,6 +15,7 @@ func newRouter(h *handler, corsOrigins []string) http.Handler {
 	if len(corsOrigins) > 0 {
 		r.Use(corsMiddleware(corsOrigins))
 	}
+	r.Use(csrfProtectionMiddleware(h))
 
 	r.Route("/api", func(r chi.Router) {
 		r.Use(noStoreMiddleware)

@@ -84,6 +84,9 @@ func performRequestFromRemoteAddr(t *testing.T, h http.Handler, method, path, bo
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	if !isSafeHTTPMethod(method) {
+		req.Header.Set("Origin", "http://example.com")
+	}
 	for _, cookie := range cookies {
 		req.AddCookie(cookie)
 	}

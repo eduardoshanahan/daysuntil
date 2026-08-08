@@ -58,6 +58,42 @@ func (r *statusRecorder) Unwrap() http.ResponseWriter {
 	return r.ResponseWriter
 }
 
+func isSafeHTTPMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	default:
+		return false
+	}
+}
+
+// csrfProtectionMiddleware enforces an exact Origin match on every
+// cookie-authenticated unsafe request. The split web/API deployment sets
+// WEB_ORIGIN, which makes the session cookie SameSite=None and the API emit
+// credentialed CORS headers — neither of those stop a cross-site page from
+// making the browser attach the cookie to a forged request, only an
+// explicit Origin check does. Bearer-token requests are exempt: a cross-site
+// page cannot make the browser attach an Authorization header, so there is
+// nothing to forge.
+func csrfProtectionMiddleware(h *handler) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isSafeHTTPMethod(r.Method) || bearerToken(r) != "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			origin := strings.TrimRight(r.Header.Get("Origin"), "/")
+			if origin == "" || origin != h.expectedOrigin(r) {
+				http.Error(w, "invalid origin", http.StatusForbidden)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 	allowed := make(map[string]bool, len(allowedOrigins))
 	for _, o := range allowedOrigins {
