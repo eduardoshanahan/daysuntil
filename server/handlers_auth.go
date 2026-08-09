@@ -9,24 +9,26 @@ import (
 // data. The JSON shape matches what the frontend already expects
 // (username/display_name/username_set) plus the new profile fields.
 type meResponse struct {
-	ID          int64  `json:"id"`
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name"`
-	FirstName   string `json:"first_name"`
-	LastName    string `json:"last_name"`
-	AvatarURL   string `json:"avatar_url"`
-	UsernameSet bool   `json:"username_set"`
+	ID                int64  `json:"id"`
+	Username          string `json:"username"`
+	DisplayName       string `json:"display_name"`
+	FirstName         string `json:"first_name"`
+	LastName          string `json:"last_name"`
+	AvatarURL         string `json:"avatar_url"`
+	UsernameSet       bool   `json:"username_set"`
+	SuggestedUsername string `json:"suggested_username,omitempty"`
 }
 
 func meResponseFromProfile(user User, profile Profile) meResponse {
 	return meResponse{
-		ID:          user.ID,
-		Username:    profile.Username,
-		DisplayName: profile.DisplayName,
-		FirstName:   profile.FirstName,
-		LastName:    profile.LastName,
-		AvatarURL:   profile.AvatarURL,
-		UsernameSet: profile.UsernameSet,
+		ID:                user.ID,
+		Username:          profile.Username,
+		DisplayName:       profile.DisplayName,
+		FirstName:         profile.FirstName,
+		LastName:          profile.LastName,
+		AvatarURL:         profile.AvatarURL,
+		UsernameSet:       profile.UsernameSet,
+		SuggestedUsername: profile.SuggestedUsername,
 	}
 }
 
@@ -78,60 +80,6 @@ func (h *handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
 
 	clearSessionCookie(w, h.cookieSecure, h.crossOrigin())
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *handler) updateProfile(w http.ResponseWriter, r *http.Request) {
-	user, err := authenticatedUser(h.db, r)
-	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	var update profileUpdate
-	if err := decodeJSONBody(w, r, &update); err != nil {
-		return
-	}
-
-	profile, err := h.profileClient.Update(r.Context(), user.OIDCSub, ProfilePatch{DisplayName: &update.DisplayName})
-	if err != nil {
-		writeProfileClientError(w, err)
-		return
-	}
-
-	writeJSON(w, meResponseFromProfile(user, profile))
-}
-
-func (h *handler) setUsername(w http.ResponseWriter, r *http.Request) {
-	user, err := authenticatedUser(h.db, r)
-	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	var req struct {
-		Username string `json:"username"`
-	}
-	if err := decodeJSONBody(w, r, &req); err != nil {
-		return
-	}
-
-	current, err := h.profileClient.GetBySub(r.Context(), user.OIDCSub)
-	if err != nil {
-		writeProfileClientError(w, err)
-		return
-	}
-	if current.UsernameSet {
-		http.Error(w, "username has already been set and cannot be changed", http.StatusBadRequest)
-		return
-	}
-
-	profile, err := h.profileClient.Update(r.Context(), user.OIDCSub, ProfilePatch{Username: &req.Username})
-	if err != nil {
-		writeProfileClientError(w, err)
-		return
-	}
-
-	writeJSON(w, meResponseFromProfile(user, profile))
 }
 
 func writeProfileClientError(w http.ResponseWriter, err error) {

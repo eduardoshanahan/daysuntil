@@ -132,7 +132,7 @@ func TestDispatchDueRemindersSendsAndMarksSentForOneTimeReminder(t *testing.T) {
 	ctx := context.Background()
 
 	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
-	if _, err := profiles.FindOrCreate(ctx, "sub-alice-001", "alice", "alice@example.com", true); err != nil {
+	if _, err := profiles.FindOrCreate(ctx, "sub-alice-001", "", "", "alice", "alice@example.com", true); err != nil {
 		t.Fatalf("set test email: %v", err)
 	}
 	interval := createIntervalForTest(t, router, cookie, "Trip")
@@ -182,7 +182,7 @@ func TestDispatchDueRemindersAdvancesRecurringReminder(t *testing.T) {
 	ctx := context.Background()
 
 	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
-	if _, err := profiles.FindOrCreate(ctx, "sub-alice-001", "alice", "alice@example.com", true); err != nil {
+	if _, err := profiles.FindOrCreate(ctx, "sub-alice-001", "", "", "alice", "alice@example.com", true); err != nil {
 		t.Fatalf("set test email: %v", err)
 	}
 	interval := createIntervalForTest(t, router, cookie, "Birthday")
@@ -242,7 +242,7 @@ func TestDispatchDueRemindersSkipsOwnerWithUnverifiedEmail(t *testing.T) {
 	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
 	// An email is on file, but the IdP has not confirmed it belongs to
 	// this user — must not be trusted as a reminder destination.
-	if _, err := profiles.FindOrCreate(ctx, "sub-alice-001", "alice", "unverified@example.com", false); err != nil {
+	if _, err := profiles.FindOrCreate(ctx, "sub-alice-001", "", "", "alice", "unverified@example.com", false); err != nil {
 		t.Fatalf("set test email: %v", err)
 	}
 	interval := createIntervalForTest(t, router, cookie, "Trip")

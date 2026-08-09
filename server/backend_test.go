@@ -129,7 +129,7 @@ func createTestUser(t *testing.T, db *sql.DB, profiles *fakeProfileClient, sub, 
 		t.Fatalf("create test user: %v", err)
 	}
 
-	if _, err := profiles.FindOrCreate(ctx, sub, username, "", false); err != nil {
+	if _, err := profiles.FindOrCreate(ctx, sub, "", "", username, "", false); err != nil {
 		t.Fatalf("create test profile: %v", err)
 	}
 
@@ -400,21 +400,6 @@ func TestCreateIntervalRejectsUnknownFields(t *testing.T) {
 	}
 }
 
-func TestUpdateDisplayName(t *testing.T) {
-	db, router, profiles := newTestServer(t)
-
-	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
-	rec := performRequest(t, router, http.MethodPut, "/api/me/profile", `{"display_name":"Eduardo Shanahan"}`, cookie)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 updating profile, got %d (%s)", rec.Code, rec.Body.String())
-	}
-
-	user := decodeUser(t, rec)
-	if user.DisplayName != "Eduardo Shanahan" {
-		t.Fatalf("expected updated display name, got %q", user.DisplayName)
-	}
-}
-
 func TestShareGroupsListCreateUpdateRotateAndDelete(t *testing.T) {
 	db, router, profiles := newTestServer(t)
 
@@ -496,9 +481,9 @@ func TestPublicShareGroupShowsOnlyAssignedIntervals(t *testing.T) {
 
 	cookie, _ := createTestUser(t, db, profiles, "sub-alice-001", "alice")
 
-	updateProfile := performRequest(t, router, http.MethodPut, "/api/me/profile", `{"display_name":"Alice Public"}`, cookie)
-	if updateProfile.Code != http.StatusOK {
-		t.Fatalf("expected 200 updating profile, got %d", updateProfile.Code)
+	displayName := "Alice Public"
+	if _, err := profiles.Update(context.Background(), "sub-alice-001", ProfilePatch{DisplayName: &displayName}); err != nil {
+		t.Fatalf("seed display name: %v", err)
 	}
 
 	group := createShareGroupForTest(t, router, cookie, "Trips")

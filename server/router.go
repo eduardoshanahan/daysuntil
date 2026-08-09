@@ -24,8 +24,6 @@ func newRouter(h *handler, corsOrigins []string) http.Handler {
 		r.Post("/logout", h.logout)
 		r.Get("/me", h.currentUser)
 		r.Delete("/me", h.deleteAccount)
-		r.Put("/me/profile", h.updateProfile)
-		r.Put("/me/username", h.setUsername)
 		r.With(authRateLimitMiddleware(h.authLimiter, authActionPublicLookup)).Get("/public/groups/{groupSlug}", h.publicShareGroup)
 	})
 

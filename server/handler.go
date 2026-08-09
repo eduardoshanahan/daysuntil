@@ -9,10 +9,6 @@ import (
 	"net/http"
 )
 
-type profileUpdate struct {
-	DisplayName string `json:"display_name"`
-}
-
 type shareGroupPayload struct {
 	Name string `json:"name"`
 }

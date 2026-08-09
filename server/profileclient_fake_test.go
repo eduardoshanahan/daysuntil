@@ -25,23 +25,32 @@ func newFakeProfileClient() *fakeProfileClient {
 	}
 }
 
-func (f *fakeProfileClient) FindOrCreate(ctx context.Context, sub, displayNameHint, email string, emailVerified bool) (Profile, error) {
+func (f *fakeProfileClient) FindOrCreate(ctx context.Context, sub, firstNameHint, lastNameHint, displayNameHint, email string, emailVerified bool) (Profile, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	firstName := strings.TrimSpace(firstNameHint)
+	lastName := strings.TrimSpace(lastNameHint)
 
 	if p, ok := f.bySub[sub]; ok {
 		if email != "" && (email != p.Email || emailVerified != p.EmailVerified) {
 			p.Email = email
 			p.EmailVerified = emailVerified
 			p.UpdatedAt = time.Now().UTC()
-			f.bySub[sub] = p
 		}
+		if firstName != "" {
+			p.FirstName = firstName
+		}
+		if lastName != "" {
+			p.LastName = lastName
+		}
+		f.bySub[sub] = p
 		return p, nil
 	}
 
 	displayName := strings.TrimSpace(displayNameHint)
 	if displayName == "" {
-		displayName = "user"
+		displayName = strings.TrimSpace(firstName + " " + lastName)
 	}
 
 	buf := make([]byte, 8)
@@ -54,6 +63,8 @@ func (f *fakeProfileClient) FindOrCreate(ctx context.Context, sub, displayNameHi
 		ID:            f.nextID,
 		OIDCSub:       sub,
 		Username:      placeholder,
+		FirstName:     firstName,
+		LastName:      lastName,
 		DisplayName:   displayName,
 		Email:         email,
 		EmailVerified: emailVerified,
